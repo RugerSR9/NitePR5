@@ -1,0 +1,14 @@
+---
+description: NitePR5 orchestrator constraints — phase gates, PS5Debug-only memory, performance caps
+alwaysApply: true
+---
+
+# NitePR5
+
+Orchestrator: read `AGENTS.md`, `docs/STATUS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md`. Spawn workers with the ORCHESTRATION preamble. Do not skip the active phase.
+
+- Memory only via `ps5dbg` → PS5Debug `:744`. No protocol reimplementation, no `PT_ATTACH` on games.
+- etaHEN plugin ≠ overlay. No `plugin/` before phase 4, no `overlay/` before phase 5.
+- Performance §5.3: turbo scan on-console, ≤256 result rows, watch ≤64 @ ~10 Hz, hex peephole ≤512 B @ ~4 Hz, freeze ≤32 @ 15 Hz. Never dump all RAM.
+- Stack: Python FastAPI + vanilla JS, localhost 1744, GoldHEN JSON only, etaHEN on FW 9.60.
+- Session API is implemented once in nitepr5-core. UIs bind to it.
