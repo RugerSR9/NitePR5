@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NitePR5</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>NitePR5</h1>
+    <p class="tagline">PS5Debug peephole · FW 9.60 · 127.0.0.1:1744</p>
+  </header>
+
+  <section id="connect-panel">
+    <h2>Connect</h2>
+    <form id="connect-form">
+      <label for="host">PS5 host</label>
+      <input id="host" name="host" type="text" placeholder="192.168.4.42" autocomplete="off" spellcheck="false">
+      <button type="submit" id="btn-connect">Connect</button>
+      <button type="button" id="btn-discover">Discover</button>
+      <button type="button" id="btn-disconnect">Disconnect</button>
+    </form>
+    <p id="connect-status" class="status" role="status"></p>
+  </section>
+
+  <section id="process-panel">
+    <h2>Processes</h2>
+    <p id="fg-status" class="muted">Connect to list processes. Foreground is highlighted.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>PID</th>
+            <th>Name</th>
+            <th>Title ID</th>
+          </tr>
+        </thead>
+        <tbody id="proc-body"></tbody>
+      </table>
+    </div>
+    <button type="button" id="btn-attach" disabled>Attach selected</button>
+    <p id="attach-status" class="status" role="status"></p>
+  </section>
+
+  <section id="maps-panel">
+    <h2>Maps</h2>
+    <p class="muted">Metadata only. Hex uses the first writable region as the peephole base — regions are not dumped.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Perms</th>
+            <th>Size</th>
+          </tr>
+        </thead>
+        <tbody id="maps-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="hex-panel">
+    <h2>Hex peephole</h2>
+    <div class="hex-toolbar">
+      <span id="hex-meta" class="mono">addr — · 512 bytes</span>
+      <button type="button" id="btn-pause" disabled>Pause</button>
+      <span id="hex-status" class="muted" role="status"></span>
+    </div>
+    <div class="table-wrap hex-wrap">
+      <table class="hex">
+        <thead>
+          <tr>
+            <th>Address</th>
+            <th>00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F</th>
+            <th>ASCII</th>
+          </tr>
+        </thead>
+        <tbody id="hex-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -2,11 +2,11 @@
 
 Homebrew memory editor for a jailbroken PS5 (firmware 9.60, etaHEN, PS5Debug). Named after PSP **NitePR**, built for PS5: the same search / hex / freeze / cheat loop, as a PC web UI first and a translucent in-game overlay later.
 
-**Read [AGENTS.md](AGENTS.md) if you are an agent** (orchestrator + sub-agent spawn rules). Humans: start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Track progress in [docs/STATUS.md](docs/STATUS.md).
+**Read [AGENTS.md](AGENTS.md) if you are an agent** (orchestrator + sub-agent spawn rules). Humans: start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Track progress in [docs/STATUS.md](docs/STATUS.md). Completed-phase facts: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
-Phase 0 is **done**: this PC talks to ps5debug-NG v1.3.0 on firmware 9.60. Next is Phase 1 (web connect + peephole read).
+Phase 1 is **done**: web UI on localhost 1744; live 512-byte peephole on `CUSA13762`. Next orchestrator: Phase 2 — start at [docs/HANDOFF.md](docs/HANDOFF.md) (“Next orchestrator”).
 
 ## Phase 0 — how to run
 
@@ -34,6 +34,24 @@ python scripts/check_ps5debug.py --discover
 ```
 
 Connect timeout is 5 seconds so an offline PC fails quickly.
+
+## Phase 1 — web UI
+
+Browser → `http://127.0.0.1:1744` → FastAPI → `ps5dbg` → PS5 `:744`. Connect, pick a process, watch a 512-byte hex peephole (≤4 Hz, Pause). No scan or write.
+
+```powershell
+python -m pip install -r requirements.txt
+python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
+```
+
+Then open `http://127.0.0.1:1744`. Host prefills from `.ps5debug-host` / `NITEPR5_PS5_HOST`. For UI-only without a console:
+
+```powershell
+$env:NITEPR5_MOCK = "1"
+python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
+```
+
+Exit test: open a PS4-on-PS5 title (`CUSA*`), Connect, attach `eboot.bin`, confirm live bytes. `python -m pytest web/tests -q` covers the mock path.
 
 ## Phases (short)
 

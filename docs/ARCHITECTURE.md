@@ -398,3 +398,6 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-20 | Performance contract: burst turbo scan on-console, watch list for live data, hex peephole, skip uncached/XOM, hard caps in §5.3. |
 | 2026-08-20 | Orchestration handoff: `AGENTS.md`, `docs/ORCHESTRATION.md`, `docs/STATUS.md`, `.cursor/rules/nitepr5.mdc`. |
 | 2026-08-21 | FW 8.00+: do not use etaHEN Toolbox “PS5Debug” (old Sistr0/CTN, firmware-gated). Load OpenSourcereR **ps5debug-NG** via elfldr 9021. |
+| 2026-08-21 | Phase 1: `web/nitepr5_core.Session` is the only memory path. FastAPI on 127.0.0.1:1744. `attach_target` is logical. `NITEPR5_MOCK=1` for UI without a console. |
+| 2026-08-21 | First live title: **CUSA13762** (The Golf Club 2019). Compressed facts: `docs/HANDOFF.md`. |
+| 2026-08-21 | Connect/reconnect must reset UI attach + hex poll (`resetTargetUi`) to match `Session.connect()` → `disconnect()`. |

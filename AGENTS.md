@@ -8,6 +8,7 @@ You are the **orchestrator** for NitePR5. You do not implement an entire phase y
 2. [docs/STATUS.md](docs/STATUS.md) — current phase; do not skip ahead
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — product, constraints, performance caps
 4. [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) — who to spawn, copy-paste prompts
+5. [docs/HANDOFF.md](docs/HANDOFF.md) — compressed facts from completed phases; paste into worker briefs
 
 ## Non-negotiables
 
