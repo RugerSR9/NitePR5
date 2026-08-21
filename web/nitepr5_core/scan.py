@@ -26,6 +26,7 @@ from .constants import (
     TS_SERVER_RESIDENT,
     TS_SNAPSHOT,
     TS_SNAPSHOT_SEGMENTS,
+    TS_USE_ALIASING,
 )
 from .errors import InvalidScanCompare, InvalidScanValue, ScanUnsupported
 from .types import ScanHit, ScanRegion
@@ -186,9 +187,9 @@ def ranges_to_segments(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
 def classify_maps(maps) -> list[tuple[int, int]]:
     """Writable, non-executable maps (rw- heaps / eboot data).
 
-    Skip r-x code and rwx. Do not call TURBOSCAN_REGIONS to classify — that
-    probe-reads 64 KiB from every readable map (including uncached ~40 MB/s
-    GPU) before the real scan starts and looks like a hang.
+    Fallback when TURBOSCAN_REGIONS is unavailable. No uncached bit on
+    ``MemoryMap`` — prefer ``classify_turbo_regions`` after a 1-byte probe.
+    Skip r-x code and rwx.
     """
     out: list[tuple[int, int]] = []
     for m in maps:
@@ -201,15 +202,27 @@ def classify_maps(maps) -> list[tuple[int, int]]:
 
 
 def classify_turbo_regions(regions: list[ScanRegion]) -> list[tuple[int, int]]:
-    """Writable (prot & 2) and cached (not uncached). Execute-only has no write."""
+    """Writable, non-executable, cached (PCD/uncached skipped)."""
     out: list[tuple[int, int]] = []
     for r in regions:
         if not (r.prot & PROT_WRITE):
+            continue
+        if r.prot & PROT_EXEC:
             continue
         if r.uncached:
             continue
         out.append((r.start, r.end))
     return out
+
+
+def turbo_start_flags(*, snapshot: bool, use_aliasing: bool) -> int:
+    """Resident multi-segment START flags. Never sets TS_PARALLEL_COMPARE."""
+    flags = TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS
+    if snapshot:
+        flags |= TS_SNAPSHOT
+    if use_aliasing:
+        flags |= TS_USE_ALIASING
+    return flags
 
 
 def hits_from_resident(
@@ -265,6 +278,8 @@ def turbo_start_resident_segments(
     compare_type: int,
     alignment: int,
     value: int,
+    *,
+    use_aliasing: bool = False,
 ) -> tuple[int, int]:
     """TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS (TS_SNAPSHOT clear).
 
@@ -277,7 +292,7 @@ def turbo_start_resident_segments(
     from ps5dbg.wire import expect_success
 
     vbytes = _scan_value_bytes(value_type, value)
-    flags = TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS
+    flags = turbo_start_flags(snapshot=False, use_aliasing=use_aliasing)
     body = _start_body(pid, 0, 0, value_type, compare_type, alignment, len(vbytes), flags)
     ts._send_value_after_ack(conn, Cmd.PROC_TURBOSCAN_START, body, vbytes)
     _send_segments(conn, segments)
@@ -294,6 +309,8 @@ def turbo_start_snapshot_segments(
     segments: list[tuple[int, int]],
     value_type: int,
     alignment: int,
+    *,
+    use_aliasing: bool = False,
 ) -> int:
     """Unknown first scan: TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS | TS_SERVER_RESIDENT.
 
@@ -307,7 +324,7 @@ def turbo_start_snapshot_segments(
     from ps5dbg.wire import expect_success, recv_u64
 
     vbytes = _scan_value_bytes(value_type, 0)
-    flags = TS_SERVER_RESIDENT | TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS
+    flags = turbo_start_flags(snapshot=True, use_aliasing=use_aliasing)
     body = _start_body(
         pid, 0, 0, value_type, SCAN_COMPARE_UNKNOWN, alignment, len(vbytes), flags
     )

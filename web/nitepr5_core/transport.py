@@ -21,7 +21,10 @@ from .constants import (
     SCAN_IO_TIMEOUT,
     SCAN_ALIGN_U32,
     SCAN_COMPARE_UNKNOWN,
+    SCAN_REGIONS_PROBE_BYTES,
     SCAN_VALUE_UINT32,
+    TSE_ALIASING,
+    TSE_RESCAN_ALIASING,
     TSE_SERVER_RESIDENT,
     TSE_SNAPSHOT,
     TSE_SNAPSHOT_SEGMENTS,
@@ -96,8 +99,12 @@ class Transport(ABC):
         ...
 
     @abstractmethod
-    def scan_regions(self, pid: int) -> list[ScanRegion] | None:
-        """TURBOSCAN_REGIONS after auth. None if the probe fails (use maps())."""
+    def scan_regions(self, pid: int, *, probe_bytes: int = SCAN_REGIONS_PROBE_BYTES) -> list[ScanRegion] | None:
+        """TURBOSCAN_REGIONS after auth. None if the probe fails (use maps()).
+
+        ``probe_bytes`` must stay at 1 (PCD bit). Never pass 0 — that is 64 KiB
+        per readable map and hangs first scan.
+        """
         ...
 
     @abstractmethod
@@ -115,7 +122,8 @@ class Transport(ABC):
     ) -> tuple[bool, int]:
         """Start a server-resident turbo scan. Returns (accepted, count).
 
-        accepted=False means resident declined — caller may iterative-fallback.
+        accepted=False means the match-list buffer declined (overflow / alloc).
+        Caller should retry via snapshot + exact COUNT, not stream hits to the PC.
         """
         ...
 
@@ -178,6 +186,7 @@ class Ps5dbgTransport(Transport):
         self.host: str | None = None
         self._scan_authed = False
         self._turbo_open = False
+        self._rescan_aliasing = False
 
     @property
     def connected(self) -> bool:
@@ -211,6 +220,7 @@ class Ps5dbgTransport(Transport):
     def disconnect(self) -> None:
         self._scan_authed = False
         self._turbo_open = False
+        self._rescan_aliasing = False
         ps5, self._ps5 = self._ps5, None
         self.host = None
         if ps5 is not None:
@@ -364,14 +374,20 @@ class Ps5dbgTransport(Transport):
         self._call(self._require().authenticate, 2)
         self._scan_authed = True
 
-    def scan_regions(self, pid: int) -> list[ScanRegion] | None:
+    def scan_regions(
+        self, pid: int, *, probe_bytes: int = SCAN_REGIONS_PROBE_BYTES
+    ) -> list[ScanRegion] | None:
         import ps5dbg.turboscan as ts
         from ps5dbg.errors import BadStatus, ConnectionLost, PS5DbgError
 
+        if probe_bytes <= 0:
+            probe_bytes = SCAN_REGIONS_PROBE_BYTES
         ps5 = self._require()
         try:
             with self.scan_wait():
-                raw = ts.turboscan_regions(ps5.connection, pid, max_regions=0, probe_bytes=0)
+                raw = ts.turboscan_regions(
+                    ps5.connection, pid, max_regions=0, probe_bytes=probe_bytes
+                )
         except (BadStatus, PS5DbgError, ConnectionLost, OSError):
             return None
         return [
@@ -402,6 +418,8 @@ class Ps5dbgTransport(Transport):
         if not segments:
             raise ScanUnsupported("no segments to scan")
         conn = self._scan_conn()
+        use_aliasing = bool(engines & TSE_ALIASING)
+        self._rescan_aliasing = bool(engines & TSE_RESCAN_ALIASING)
         try:
             with self.scan_wait():
                 if unknown:
@@ -410,7 +428,12 @@ class Ps5dbgTransport(Transport):
                             "unknown first scan needs turbo snapshot (TSE_SNAPSHOT)"
                         )
                     count = turbo_start_snapshot_segments(
-                        conn, pid, segments, value_type, alignment
+                        conn,
+                        pid,
+                        segments,
+                        value_type,
+                        alignment,
+                        use_aliasing=use_aliasing,
                     )
                     self._turbo_open = True
                     return True, count
@@ -418,6 +441,9 @@ class Ps5dbgTransport(Transport):
                     return False, 0
                 if len(segments) == 1:
                     addr, length = segments[0]
+                    flags = ts.TS_SERVER_RESIDENT
+                    if use_aliasing:
+                        flags |= ts.TS_USE_ALIASING
                     stored, count = ts.turboscan_start_resident(
                         conn,
                         pid,
@@ -427,7 +453,7 @@ class Ps5dbgTransport(Transport):
                         compare_type,
                         alignment,
                         value,
-                        flags=ts.TS_SERVER_RESIDENT,
+                        flags=flags,
                     )
                     if stored == 0:
                         return False, count
@@ -436,7 +462,14 @@ class Ps5dbgTransport(Transport):
                 if not (engines & TSE_SNAPSHOT_SEGMENTS):
                     return False, 0
                 stored, count = turbo_start_resident_segments(
-                    conn, pid, segments, value_type, compare_type, alignment, value
+                    conn,
+                    pid,
+                    segments,
+                    value_type,
+                    compare_type,
+                    alignment,
+                    value,
+                    use_aliasing=use_aliasing,
                 )
                 if stored == 0:
                     return False, count
@@ -463,6 +496,9 @@ class Ps5dbgTransport(Transport):
         import ps5dbg.turboscan as ts
 
         conn = self._scan_conn()
+        flags = ts.TS_SERVER_RESIDENT
+        if self._rescan_aliasing:
+            flags |= ts.TS_RESCAN_ALIASING
         with self.scan_wait():
             return self._call(
                 ts.turboscan_count_resident,
@@ -470,7 +506,7 @@ class Ps5dbgTransport(Transport):
                 value_type,
                 compare_type,
                 value,
-                flags=ts.TS_SERVER_RESIDENT,
+                flags=flags,
             )
 
     def scan_get_resident(
@@ -595,12 +631,16 @@ class MockTransport(Transport):
     SHELL_PID = 1
     UI_PID = 200
     RAM_BASE = 0x200000000
-    RAM_SIZE = 0x3000  # r-x 4K + rw- eboot 4K + heap 4K
+    HEAP_END = RAM_BASE + 0x3000
+    GPU_START = RAM_BASE + 0x4000
+    GPU_END = RAM_BASE + 0x5000
+    STORE_SIZE = 0x5000
     TITLEID = "CUSA00004"
     CONTENTID = "IV0000-CUSA00004_00-EXAMPLE000000000"
     APP_VER = "01.00"
 
     # Planted UINT32s. 100 in r-x is a decoy (must not match default regions).
+    # GPU/SceGnm is rw- but uncached — cheap TURBOSCAN_REGIONS must skip it.
     PLANTED_U32 = 100
     DECOY_RX_ADDR = RAM_BASE + 0x0FFC
     WRITABLE_EBOOT_ADDR = RAM_BASE + 0x1000
@@ -608,26 +648,36 @@ class MockTransport(Transport):
     HEAP_B = RAM_BASE + 0x2004
     HEAP_C = RAM_BASE + 0x2008
     HEAP_D = RAM_BASE + 0x2010
+    GPU_ADDR = GPU_START
 
     def __init__(self) -> None:
         self.host: str | None = None
         self._connected = False
         self.maps_fetch_count = 0
         self.regions_probe_count = 0
+        self.last_regions_probe_bytes = 0
         self.get_resident_calls = 0
         self.unbounded_get_attempted = False
         self.scan_auth_count = 0
+        self.iterative_start_calls = 0
+        self.decline_resident = False
+        self.decline_snapshot = False
+        self.fail_regions_probe = False
+        self.last_use_aliasing = False
+        self.last_rescan_aliasing = False
         self._scan_authed = False
         self._turbo_open = False
+        self._rescan_aliasing = False
         self._survivors: list[ScanHit] = []
         self._value_type = SCAN_VALUE_UINT32
-        self._ram = bytearray(i % 256 for i in range(self.RAM_SIZE))
+        self._ram = bytearray(i % 256 for i in range(self.STORE_SIZE))
         self.poke_u32(self.DECOY_RX_ADDR, self.PLANTED_U32)
         self.poke_u32(self.WRITABLE_EBOOT_ADDR, self.PLANTED_U32)
         self.poke_u32(self.HEAP_A, self.PLANTED_U32)
         self.poke_u32(self.HEAP_B, 200)
         self.poke_u32(self.HEAP_C, self.PLANTED_U32)
         self.poke_u32(self.HEAP_D, 50)
+        self.poke_u32(self.GPU_ADDR, self.PLANTED_U32)
         self._procs = [
             ProcessInfo(pid=self.SHELL_PID, name="SceSysCore"),
             ProcessInfo(pid=self.EBOOT_PID, name="eboot.bin"),
@@ -659,9 +709,16 @@ class MockTransport(Transport):
                 MemoryMap(
                     name="heap",
                     start=self.RAM_BASE + 0x2000,
-                    end=self.RAM_BASE + self.RAM_SIZE,
+                    end=self.HEAP_END,
                     offset=0,
                     prot=3,  # rw-
+                ),
+                MemoryMap(
+                    name="SceGnm",
+                    start=self.GPU_START,
+                    end=self.GPU_END,
+                    offset=0,
+                    prot=3,  # rw- uncached (Garlic)
                 ),
             ]
         }
@@ -688,6 +745,7 @@ class MockTransport(Transport):
         self.host = None
         self._scan_authed = False
         self._turbo_open = False
+        self._rescan_aliasing = False
         self._survivors = []
 
     def poke_u32(self, address: int, value: int) -> None:
@@ -749,7 +807,13 @@ class MockTransport(Transport):
 
     def scan_caps(self) -> tuple[int, int, int] | None:
         self._require()
-        engines = TSE_SERVER_RESIDENT | TSE_SNAPSHOT | TSE_SNAPSHOT_SEGMENTS
+        engines = (
+            TSE_ALIASING
+            | TSE_SERVER_RESIDENT
+            | TSE_SNAPSHOT
+            | TSE_SNAPSHOT_SEGMENTS
+            | TSE_RESCAN_ALIASING
+        )
         return (1, engines, 1)
 
     def scan_authenticate(self) -> None:
@@ -757,11 +821,23 @@ class MockTransport(Transport):
         self.scan_auth_count += 1
         self._scan_authed = True
 
-    def scan_regions(self, pid: int) -> list[ScanRegion] | None:
+    def scan_regions(
+        self, pid: int, *, probe_bytes: int = SCAN_REGIONS_PROBE_BYTES
+    ) -> list[ScanRegion] | None:
         self._require()
         self.regions_probe_count += 1
+        self.last_regions_probe_bytes = (
+            SCAN_REGIONS_PROBE_BYTES if probe_bytes <= 0 else probe_bytes
+        )
+        if self.fail_regions_probe:
+            return None
         return [
-            ScanRegion(start=m.start, end=m.end, prot=m.prot, uncached=False)
+            ScanRegion(
+                start=m.start,
+                end=m.end,
+                prot=m.prot,
+                uncached=(m.name == "SceGnm"),
+            )
             for m in self._maps.get(pid, ())
         ]
 
@@ -808,6 +884,12 @@ class MockTransport(Transport):
         self._require()
         if not self._scan_authed:
             raise ScanUnsupported("scan authenticate(flags=2) required before stateful scan")
+        self.last_use_aliasing = bool(engines & TSE_ALIASING)
+        self._rescan_aliasing = bool(engines & TSE_RESCAN_ALIASING)
+        if self.decline_resident and not unknown:
+            return False, 0
+        if self.decline_snapshot and unknown:
+            raise ScanUnsupported("server declined unknown snapshot (snapshot_ok=0)")
         self._value_type = value_type
         ct = SCAN_COMPARE_UNKNOWN if unknown else compare_type
         align = alignment if alignment > 0 else SCAN_ALIGN_U32
@@ -828,6 +910,7 @@ class MockTransport(Transport):
         self._require()
         if not self._turbo_open:
             raise ScanUnsupported("no resident scan")
+        self.last_rescan_aliasing = self._rescan_aliasing
         size = value_size(value_type)
         nxt: list[ScanHit] = []
         for hit in self._survivors:
@@ -879,6 +962,7 @@ class MockTransport(Transport):
         alignment: int,
         value: int,
     ) -> list[ScanHit]:
+        self.iterative_start_calls += 1
         accepted, _count = self.scan_start_turbo(
             pid,
             segments,

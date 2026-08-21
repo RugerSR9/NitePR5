@@ -63,7 +63,7 @@ class SessionMockTests(unittest.TestCase):
         self.session.connect("mock")
         self.session.attach_target(MockTransport.EBOOT_PID)
         first = self.session.maps()
-        self.assertEqual(len(first), 3)
+        self.assertEqual(len(first), 4)
         self.assertEqual(self.transport.maps_fetch_count, 1)
         second = self.session.maps()
         self.assertEqual(self.transport.maps_fetch_count, 1)

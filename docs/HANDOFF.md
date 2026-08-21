@@ -10,7 +10,7 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 Phases **0 and 1 are `done`**. Phase **2 is `code_complete`** (mock **49 passed**). Do **not** re-do 0–2. Do **not** mark Phase 2 `done` from mocks.
 
-**Preferred next step:** run the Phase 2 hardware exit on **CUSA13762** with the **current** tree (timeout + no `TURBOSCAN_REGIONS` probe). Restart uvicorn after every pull. If the user overrides, start Phase 3 while 2 stays `code_complete`.
+**Preferred next step:** run the Phase 2 hardware exit on **CUSA13762** with the **current** tree (aliasing flags + `TURBOSCAN_REGIONS` `probe_bytes=1`). Restart uvicorn after every pull. If the user overrides, start Phase 3 while 2 stays `code_complete`.
 
 ### Git
 
@@ -262,23 +262,23 @@ Compare names: `exact` / `equal`, `increased`, `decreased`, `changed`, `unchange
 
 Undo: empty stack → `turboscan_end` and hunt ends (`scan_undo() is None`). Next-scan undo restores a previous generation **only if that count was ≤256**; else `UndoTooLarge`.
 
-### Region classify (locked — do not “fix” back to TURBOSCAN_REGIONS)
+### Region classify
 
-`Session._scan_segments` uses **cached `maps()` only**: `classify_maps` keeps **writable AND NOT executable** (`rw-` heaps / eboot data). Skips r-x and rwx. (Default region name is still `writable_cached`; there is no uncached bit on `MemoryMap`, so this is prot-only.)
+`Session._scan_segments` calls **`TURBOSCAN_REGIONS` with `probe_bytes=1`** (never 0). The 1-byte probe still returns leaf-PTE **PCD** (uncached). Then `classify_turbo_regions` keeps writable, non-executable, **cached** ranges. If the probe fails (`None`), fall back to cached `maps()` + `classify_maps` (prot-only, no PCD bit).
 
-**Do not call `turboscan_regions` / `CMD_PROC_TURBOSCAN_REGIONS` on first scan.** With `probe_bytes=0` the server **always** probe-reads **64 KiB from every readable region** (CUSA13762 ≈ **370** maps), including uncached GPU (~40 MB/s). That runs **before** turbo start, looks like a hang, and is not a value scan. `classify_turbo_regions` still exists for a later opt-in; `_scan_segments` must not call it. Mock: `regions_probe_count == 0` after `scan_start`.
+**Never pass `probe_bytes=0`.** That is the server default of **64 KiB × every readable map** (CUSA13762 ≈ **370**, including Garlic ~40 MB/s) and hangs before turbo starts. Mock: `regions_probe_count == 1` and `last_regions_probe_bytes == 1` after `scan_start`; planted `SceGnm` GPU hit is excluded.
 
-Logger `nitepr5` (INFO): `first scan: N rw- segments, X MiB (no region-probe)`. `web/app.py` sets that logger to INFO.
+Logger `nitepr5` (INFO): `first scan: N rw- segments, X MiB (pcd|maps-fallback)`. `web/app.py` sets that logger to INFO.
 
 ### Turbo path (ps5dbg 0.1.1)
 
 - `authenticate(flags=2)` before stateful scan (`scan_caps` does not need auth)
-- Caps → classify from maps → `turboscan_start_resident` (one range) or **segment gap-fill**
-- Multi-segment: flags `TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS` (`TS_SNAPSHOT` **clear**). After the two value acks, send `u32 count` then `count × {u64 addr; u32 length}` (12 bytes each). Packet address/length ignored. Bound `1 .. 1048576`. Reply `{u32 resident_stored; u64 count}`. `resident_stored==0` → declined. Implemented in `scan.turbo_start_resident_segments` using `ps5dbg.turboscan` packing + `Cmd` + `connection` — **no new opcodes**. `turboscan_start_resident` in ps5dbg 0.1.1 does **not** send this list.
-- Next: `turboscan_count_resident` (progress is a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**)
+- Caps → cheap region classify (`probe_bytes=1`) → `turboscan_start_resident` (one range) or **segment gap-fill**
+- Multi-segment: flags `TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS` plus **`TS_USE_ALIASING` when `TSE_ALIASING` is advertised** (`TS_SNAPSHOT` **clear**; never `TS_PARALLEL_COMPARE` on resident). After the two value acks, send `u32 count` then `count × {u64 addr; u32 length}` (12 bytes each). Packet address/length ignored. Bound `1 .. 1048576`. Reply `{u32 resident_stored; u64 count}`. `resident_stored==0` → declined. Implemented in `scan.turbo_start_resident_segments` using `ps5dbg.turboscan` packing + `Cmd` + `connection` — **no new opcodes**. `turboscan_start_resident` in ps5dbg 0.1.1 does **not** send this list.
+- Next: `turboscan_count_resident` with **`TS_RESCAN_ALIASING` when advertised** (progress is a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**)
 - Results: `turboscan_get_resident` only if `count ≤ 256`
-- Unknown: `TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS | TS_SERVER_RESIDENT`. Drain plan/progress/summary; never download RAM. No iterative fallback for unknown → `ScanUnsupported`. ps5dbg raises `NotImplementedError` if you pass `TS_SNAPSHOT` into `turboscan_start_resident`; use `turbo_start_snapshot_segments`.
-- Fallback if no turbo caps / resident declined: `protocol.proc_scan_start/count/get` (client-held candidates, still ≤256 rows out). Unknown never uses this.
+- Unknown: `TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS | TS_SERVER_RESIDENT` (+ aliasing if advertised). Drain plan/progress/summary; never download RAM. No iterative fallback for unknown → `ScanUnsupported`. ps5dbg raises `NotImplementedError` if you pass `TS_SNAPSHOT` into `turboscan_start_resident`; use `turbo_start_snapshot_segments`.
+- Fallback **only if turbo caps are missing**: `protocol.proc_scan_start/count/get` (client-held candidates, still ≤256 rows out). If turbo exists but `resident_stored==0` on an exact first scan, **retry snapshot + exact COUNT** (bitmap stays on the console; common values overflow the 256 MiB match list). If snapshot is missing or declined → `ScanUnsupported`. Never stream the hit list. Unknown never uses iterative.
 - **Never** `PS5Debug.scan()` / `scan_aob_find_all()`.
 
 ### :744 I/O — timeouts, lock, hex poll (learned live 2026-08-21)
@@ -319,7 +319,7 @@ Vanilla JS IIFE, `fetch('/api/...')` only. Scan section in `index.html` between 
 
 ### Mock
 
-`MockTransport.PLANTED_U32 = 100` at `WRITABLE_EBOOT_ADDR`, `HEAP_A`, `HEAP_C`. r-x decoy at `DECOY_RX_ADDR` must not match. `poke_u32` for next-scan. `get_resident_calls` / `unbounded_get_attempted` / `regions_probe_count`. `NITEPR5_MOCK=1` still uses mock (no real turbo).
+`MockTransport.PLANTED_U32 = 100` at `WRITABLE_EBOOT_ADDR`, `HEAP_A`, `HEAP_C`. r-x decoy at `DECOY_RX_ADDR` must not match. Uncached `SceGnm` at `GPU_ADDR` must not match when the cheap region probe works. `poke_u32` for next-scan. `get_resident_calls` / `unbounded_get_attempted` / `regions_probe_count` / `last_use_aliasing` / `last_rescan_aliasing`. `NITEPR5_MOCK=1` still uses mock (no real turbo).
 
 ### Live hardware lessons (do not re-discover)
 
@@ -329,21 +329,23 @@ Vanilla JS IIFE, `fetch('/api/...')` only. Scan section in `index.html` between 
 | Same pid **115**, title **CUSA13762** / app_ver **01.02** | Same launch as Phase 1 exit until the game is closed; pid changes next launch. |
 | `GET /api/read` → **409** after uvicorn restart | Old tab still polling; `NotConnected`. Refresh the page and Connect again. |
 | `timed out reading 8 bytes` + rest-mode hint | 10s socket timeout during turbo progress — **fixed** (`scan_wait`). Reconnect once if the old socket desynced. |
-| First Scan “hung”, then `POST /api/scan/start 200` on Ctrl+C | Hunt was in flight; uvicorn logs completion only. Cause: **`TURBOSCAN_REGIONS` 64 KiB × ~370 maps** — **fixed** (maps classify only). |
+| First Scan “hung”, then `POST /api/scan/start 200` on Ctrl+C | Hunt was in flight; uvicorn logs completion only. Cause: **`TURBOSCAN_REGIONS` 64 KiB × ~370 maps** — **fixed** (`probe_bytes=1` + skip PCD). |
 | Hex poll continuing during a hunt | Must not happen with current JS. If it does, uvicorn was not restarted. |
 
 ### Orchestration (what we spawned)
 
 1. **Core first, alone** — `web/nitepr5_core/`
 2. **Then parallel** — UI (`web/app.py`, `web/static/`) and HTTP tests (`web/tests/`)
-3. Orchestrator unify: First Scan replaces idle hunt; then timeout/lock/hex-pause; then drop `TURBOSCAN_REGIONS` probe
+3. Orchestrator unify: First Scan replaces idle hunt; then timeout/lock/hex-pause; then cheap `TURBOSCAN_REGIONS` (`probe_bytes=1`) + aliasing flags
 
 ### Traps for Phase 3+
 
 - Watch/freeze/write live in `nitepr5_core`. No second memory path. UI timers (~10 Hz / 15 Hz) must take the same `:744` `_io` lock (or pause during scan) — do not interleave protocol on one socket.
 - Count first; cap **256** results. Never `regions="all"`. Never `PS5Debug.scan()`.
 - Do not open a second `:744` connection for scans (survivors are per TCP session).
-- Do not call `TURBOSCAN_REGIONS` with default `probe_bytes=0` on the hot path.
+- Do not call `TURBOSCAN_REGIONS` with `probe_bytes=0` on the hot path (64 KiB × all readable maps). Use `probe_bytes=1`.
+- Do not set `TS_PARALLEL_COMPARE` on resident START (streaming-only; over-subscribes with aliasing).
+- Do not iterative-fallback when turbo resident declines (`resident_stored=0`). Retry snapshot + exact COUNT.
 - Keep the segment-list gap-fill; do not reimplement TCP. `turboscan_start_resident` still has no segment list in ps5dbg 0.1.1.
 - `plugin/` and `overlay/` still forbidden.
 - After code changes: **restart uvicorn**. Browser cache of `app.js` may need a hard refresh.

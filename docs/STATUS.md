@@ -7,15 +7,15 @@ product: NitePR5
 active_phase: 2
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-21
-# Phase 2 code-complete: mock pytest 49 passed. Hardware exit (CUSA13762 hunt) not run.
-# Next session: run the hardware exit (restart uvicorn first), or start Phase 3 if the user overrides. Read docs/HANDOFF.md (Phase 2 hardware lessons).
+# Phase 2 code-complete: mock pytest 54 passed (overflow → snapshot+exact). Hardware exit not run.
+# Next session: restart uvicorn, run the hardware exit, or start Phase 3 if the user overrides. Read docs/HANDOFF.md.
 ```
 
 | Phase | State | Notes |
 |---|---|---|
 | 0 Environment | done | ps5debug-NG 1.3.0 on FW 9.60; procs + foreground from this PC |
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
-| 2 Scan loop | code_complete | Turbo scan + count-first UI; scan I/O waits (no 10s recv timeout); classify from maps() rw- only (no TURBOSCAN_REGIONS probe); pytest 49. Hardware hunt not run. |
+| 2 Scan loop | code_complete | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. Hardware hunt not run. |
 | 3 Hex, watch, freeze, JSON | not_started | First shippable product |
 | 4 Plugin daemon | not_started | Do not create `plugin/` early |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
@@ -24,7 +24,7 @@ last_updated: 2026-08-21
 ## Blockers
 
 - Hardware exit test still needs CUSA13762 in the foreground with a changing integer (score/timer). Do not mark Phase 2 `done` from mocks. Restart uvicorn so the current tree is loaded.
-- Two live failures already fixed in tree (see HANDOFF Phase 2 lessons): (1) 10s recv timeout on turbo progress `u64`; (2) `TURBOSCAN_REGIONS` 64 KiB-probes of all maps. Re-test both.
+- Two live failures already fixed in tree (see HANDOFF Phase 2 lessons): (1) 10s recv timeout on turbo progress `u64`; (2) `TURBOSCAN_REGIONS` 64 KiB-probes of all maps (now `probe_bytes=1` + skip PCD). Re-test both plus aliasing.
 
 ## Session log
 
@@ -49,3 +49,5 @@ last_updated: 2026-08-21
 | 2026-08-21 | orchestrator | First scan was hanging on TURBOSCAN_REGIONS 64KiB probes of all maps. Classify from maps() rw- only. |
 | 2026-08-21 | orchestrator | Scan-speed research: turbo resident is on, but TS_USE_ALIASING / TS_RESCAN_ALIASING are never set; maps() classify has no PCD skip. Do not default-probe TURBOSCAN_REGIONS. |
 | 2026-08-21 | orchestrator | Expanded docs/HANDOFF.md with Phase 2 API, timeout/lock/hex-pause, probe hang, uvicorn log trap, live CUSA13762 lessons. |
+| 2026-08-21 | orchestrator | Scan speed on `phase_2-speedImprovements`: TS_USE_ALIASING + TS_RESCAN_ALIASING; TURBOSCAN_REGIONS probe_bytes=1 skip PCD; resident decline → ScanUnsupported. pytest 53. |
+| 2026-08-21 | orchestrator | Exact first-scan overflow: snapshot then exact COUNT instead of ScanUnsupported / iterative dump. |

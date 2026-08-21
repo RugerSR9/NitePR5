@@ -23,10 +23,16 @@ from nitepr5_core import (  # noqa: E402
     ResultsTooMany,
     ScanActive,
     ScanHit,
+    ScanUnsupported,
     Session,
 )
-from nitepr5_core.scan import classify_maps, u32_from_bytes  # noqa: E402
-from nitepr5_core.types import MemoryMap  # noqa: E402
+from nitepr5_core.scan import (  # noqa: E402
+    classify_maps,
+    classify_turbo_regions,
+    turbo_start_flags,
+    u32_from_bytes,
+)
+from nitepr5_core.types import MemoryMap, ScanRegion  # noqa: E402
 from nitepr5_core.transport import Ps5dbgTransport  # noqa: E402
 
 _FORBIDDEN_ATTACH = frozenset(
@@ -67,7 +73,11 @@ def test_exact_u32_finds_planted_writable_only(
         MockTransport.HEAP_C,
     }
     assert MockTransport.DECOY_RX_ADDR not in addrs
-    assert transport.regions_probe_count == 0
+    assert MockTransport.GPU_ADDR not in addrs
+    assert transport.regions_probe_count == 1
+    assert transport.last_regions_probe_bytes == 1
+    assert transport.last_use_aliasing is True
+    assert transport.iterative_start_calls == 0
     for hit in hits:
         assert isinstance(hit, ScanHit)
         assert u32_from_bytes(hit.current) == MockTransport.PLANTED_U32
@@ -113,6 +123,7 @@ def test_next_scan_changed_increased_decreased_exact(
     assert session.scan_next(compare="exact", value=100) == 2
     addrs = {h.addr for h in session.scan_results(256)}
     assert addrs == {MockTransport.WRITABLE_EBOOT_ADDR, MockTransport.HEAP_C}
+    assert transport.last_rescan_aliasing is True
 
 
 def test_undo_restores_previous_count_and_results(
@@ -217,6 +228,76 @@ def test_classify_maps_skips_executable() -> None:
         MemoryMap(name="rwx", start=0x2000, end=0x3000, offset=0, prot=7),
     ]
     assert classify_maps(maps) == [(0x1000, 0x2000)]
+
+
+def test_classify_turbo_regions_skips_uncached_and_exec() -> None:
+    regions = [
+        ScanRegion(start=0, end=0x1000, prot=5, uncached=False),
+        ScanRegion(start=0x1000, end=0x2000, prot=3, uncached=False),
+        ScanRegion(start=0x2000, end=0x3000, prot=3, uncached=True),
+        ScanRegion(start=0x3000, end=0x4000, prot=7, uncached=False),
+    ]
+    assert classify_turbo_regions(regions) == [(0x1000, 0x2000)]
+
+
+def test_turbo_start_flags_aliasing_not_parallel() -> None:
+    from nitepr5_core.constants import (
+        TS_PARALLEL_COMPARE,
+        TS_SERVER_RESIDENT,
+        TS_SNAPSHOT,
+        TS_SNAPSHOT_SEGMENTS,
+        TS_USE_ALIASING,
+    )
+
+    flags = turbo_start_flags(snapshot=False, use_aliasing=True)
+    assert flags & TS_USE_ALIASING
+    assert flags & TS_SERVER_RESIDENT
+    assert flags & TS_SNAPSHOT_SEGMENTS
+    assert not (flags & TS_SNAPSHOT)
+    assert not (flags & TS_PARALLEL_COMPARE)
+
+    snap = turbo_start_flags(snapshot=True, use_aliasing=True)
+    assert snap & TS_SNAPSHOT
+    assert snap & TS_USE_ALIASING
+
+
+def test_resident_overflow_uses_snapshot_then_exact(
+    connected: tuple[Session, MockTransport],
+) -> None:
+    session, transport = connected
+    transport.decline_resident = True
+    count = session.scan_start(value=100)
+    assert count == 3
+    addrs = {h.addr for h in session.scan_results(256)}
+    assert addrs == {
+        MockTransport.WRITABLE_EBOOT_ADDR,
+        MockTransport.HEAP_A,
+        MockTransport.HEAP_C,
+    }
+    assert transport.iterative_start_calls == 0
+
+
+def test_resident_and_snapshot_decline_does_not_stream_hits(
+    connected: tuple[Session, MockTransport],
+) -> None:
+    session, transport = connected
+    transport.decline_resident = True
+    transport.decline_snapshot = True
+    with pytest.raises(ScanUnsupported, match="snapshot"):
+        session.scan_start(value=100)
+    assert transport.iterative_start_calls == 0
+
+
+def test_region_probe_failure_falls_back_to_maps(
+    connected: tuple[Session, MockTransport],
+) -> None:
+    session, transport = connected
+    transport.fail_regions_probe = True
+    count = session.scan_start(value=100)
+    assert count == 4
+    addrs = {h.addr for h in session.scan_results(256)}
+    assert MockTransport.GPU_ADDR in addrs
+    assert transport.regions_probe_count == 1
 
 
 def test_no_pt_attach_or_debug_session_or_dump_scan() -> None:
