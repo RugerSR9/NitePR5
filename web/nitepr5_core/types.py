@@ -54,3 +54,22 @@ class MemoryMap:
     @property
     def size(self) -> int:
         return self.end - self.start
+
+
+@dataclass(frozen=True, slots=True)
+class ScanHit:
+    """One survivor from scan_results. current/previous are raw little-endian bytes."""
+
+    addr: int
+    current: bytes
+    previous: bytes | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScanRegion:
+    """One classified region (turbo regions probe or maps fallback)."""
+
+    start: int
+    end: int
+    prot: int
+    uncached: bool = False
