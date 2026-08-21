@@ -401,3 +401,5 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-21 | Phase 1: `web/nitepr5_core.Session` is the only memory path. FastAPI on 127.0.0.1:1744. `attach_target` is logical. `NITEPR5_MOCK=1` for UI without a console. |
 | 2026-08-21 | First live title: **CUSA13762** (The Golf Club 2019). Compressed facts: `docs/HANDOFF.md`. |
 | 2026-08-21 | Connect/reconnect must reset UI attach + hex poll (`resetTargetUi`) to match `Session.connect()` → `disconnect()`. |
+| 2026-08-21 | Phase 2: turbo resident + `TS_SNAPSHOT_SEGMENTS` gap-fill in `Ps5dbgTransport` (ps5dbg 0.1.1 helper omits the trailing list). Unknown is turbo-snapshot only — no iterative RAM dump. `scan_start` replaces an idle hunt; `ScanActive` only while `_busy`. If count > 256, `scan_results` returns `[]` (no GET). |
+| 2026-08-21 | Scan waits on :744 without the 10s connect timeout (`SCAN_IO_TIMEOUT is None`). Hex poll pauses during scan; one lock serializes command-socket I/O. TCP keepalive detects a dropped 744. |

@@ -51,3 +51,72 @@ class InvalidReadSize(NitePR5Error):
     def __init__(self, n: object) -> None:
         self.n = n
         super().__init__(f"read length must be > 0, got {n!r}")
+
+
+class ResultsTooMany(NitePR5Error):
+    """scan_results(limit) refused: limit exceeds RESULTS_MAX (256)."""
+
+    def __init__(self, limit: int, max_n: int | None = None) -> None:
+        from .constants import RESULTS_MAX
+
+        self.limit = limit
+        self.max_n = RESULTS_MAX if max_n is None else max_n
+        super().__init__(
+            f"scan_results limit {limit} exceeds max {self.max_n} "
+            f"(count-first UI; narrow in-game, then Next Scan)"
+        )
+
+
+class InvalidResultLimit(NitePR5Error):
+    """scan_results(limit) refused: limit is not a positive int."""
+
+    def __init__(self, limit: object) -> None:
+        self.limit = limit
+        super().__init__(f"scan_results limit must be > 0, got {limit!r}")
+
+
+class ScanActive(NitePR5Error):
+    """A scan is already in flight (one scan per Session / PID)."""
+
+
+ScanInFlight = ScanActive
+
+
+class ScanUnsupported(NitePR5Error):
+    """Turbo snapshot declined, unknown without a path, or unsafe to continue."""
+
+
+class NoScan(NitePR5Error):
+    """scan_next / undo / count / results called with no active scan."""
+
+
+class UndoTooLarge(NitePR5Error):
+    """Cannot undo: previous generation had more than RESULTS_MAX hits (never fetched)."""
+
+    def __init__(self, count: int, max_n: int | None = None) -> None:
+        from .constants import RESULTS_MAX
+
+        self.count = count
+        self.max_n = RESULTS_MAX if max_n is None else max_n
+        super().__init__(
+            f"cannot undo: previous scan count {count} exceeds {self.max_n} "
+            f"(that generation was never fetched)"
+        )
+
+
+class InvalidScanRegions(NitePR5Error):
+    """Region set is not allowed (default is writable_cached; never 'all')."""
+
+    def __init__(self, regions: object) -> None:
+        self.regions = regions
+        super().__init__(
+            f"scan regions must be 'writable_cached' (never default 'all'), got {regions!r}"
+        )
+
+
+class InvalidScanValue(NitePR5Error):
+    """Missing or out-of-range scan value (exact u32 requires 0..0xFFFFFFFF)."""
+
+
+class InvalidScanCompare(NitePR5Error):
+    """Unknown compare name, or a compare that is not valid for this step."""

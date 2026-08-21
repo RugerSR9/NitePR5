@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>NitePR5</h1>
-    <p class="tagline">PS5Debug peephole · FW 9.60 · 127.0.0.1:1744</p>
+    <p class="tagline">PS5Debug peephole + scan · FW 9.60 · 127.0.0.1:1744</p>
   </header>
 
   <section id="connect-panel">
@@ -58,6 +58,45 @@
           </tr>
         </thead>
         <tbody id="maps-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="scan-panel">
+    <h2>Scan</h2>
+    <p class="muted">Count-first turbo scan on writable cached regions. Fetch at most 256 rows — never a RAM dump.</p>
+    <div class="scan-controls">
+      <label for="scan-value">Value</label>
+      <input id="scan-value" name="scan-value" type="text" placeholder="100 or 0x64" autocomplete="off" spellcheck="false">
+      <span class="muted">First: Exact</span>
+      <label class="check">
+        <input id="scan-unknown" type="checkbox">
+        Unknown initial
+      </label>
+      <label for="scan-next-compare">Next</label>
+      <select id="scan-next-compare">
+        <option value="exact" selected>exact</option>
+        <option value="increased">increased</option>
+        <option value="decreased">decreased</option>
+        <option value="changed">changed</option>
+        <option value="unchanged">unchanged</option>
+      </select>
+      <button type="button" id="btn-scan-first" disabled>First Scan</button>
+      <button type="button" id="btn-scan-next" disabled>Next Scan</button>
+      <button type="button" id="btn-scan-undo" disabled>Undo</button>
+    </div>
+    <p id="scan-count" class="scan-count" role="status">Count: —</p>
+    <p id="scan-status" class="status" role="status"></p>
+    <p id="scan-hint" class="muted"></p>
+    <div class="table-wrap scan-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Address</th>
+            <th>Current (u32)</th>
+          </tr>
+        </thead>
+        <tbody id="scan-body"></tbody>
       </table>
     </div>
   </section>

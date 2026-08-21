@@ -59,7 +59,7 @@ form {
 
 label { color: var(--muted); }
 
-input[type="text"] {
+input[type="text"], select {
   min-width: 14rem;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
@@ -67,6 +67,15 @@ input[type="text"] {
   background: var(--panel);
   color: var(--text);
   font: inherit;
+}
+
+select { min-width: 8rem; }
+
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text);
 }
 
 button {
@@ -134,3 +143,19 @@ table.hex .bytes { color: var(--hex); }
 table.hex .ascii { color: var(--ascii); }
 
 .hex-wrap { max-height: 38rem; overflow: auto; }
+
+.scan-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.scan-count {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.scan-wrap { max-height: 18rem; overflow: auto; }

@@ -1,26 +1,92 @@
-"""NitePR5 session — Phase 1: discover, connect, processes, maps, peephole read.
+"""NitePR5 session — connect, maps, peephole read, turbo scan loop.
 
 ``attach_target`` is logical (stores the pid). It does not debugger-attach.
-write / scan / freeze / cheats are not implemented in this phase.
+write / freeze / cheats are not implemented in this phase.
+
+Scan policy (ARCHITECTURE §5.3):
+- One scan per Session / one ``:744`` connection. A new ``scan_start`` ends
+  the previous hunt (like ``connect()`` disconnects first). ``ScanActive``
+  only if a scan op is already in flight (``_busy``).
+- ``attach_target`` to a different pid while a scan is active raises ``ScanActive``.
+- ``disconnect()`` ends any scan (``turboscan_end``) then drops the TCP session.
+- Default type UINT32, alignment 4, compare exact, regions writable+cached.
+- Unknown first scan requires ``unknown=True`` or ``compare='unknown'``.
+- ``scan_results`` refuses limit > 256 or <= 0. If count > 256, returns [] and
+  does not GET (count-first UI).
 """
 
 from __future__ import annotations
 
-from .constants import CONNECT_TIMEOUT, EBOOT_NAME, PS5DEBUG_PORT, READ_MAX
+import logging
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from collections.abc import Iterator
+
+from .constants import (
+    CONNECT_TIMEOUT,
+    EBOOT_NAME,
+    PS5DEBUG_PORT,
+    READ_MAX,
+    RESULTS_MAX,
+    SCAN_ALIGN_U32,
+    SCAN_COMPARE_EXACT,
+    SCAN_COMPARE_UNKNOWN,
+    SCAN_REGIONS_DEFAULT,
+    TSE_SERVER_RESIDENT,
+    TSE_SNAPSHOT,
+)
 from .errors import (
     ConnectFailed,
     InvalidReadSize,
+    InvalidResultLimit,
+    InvalidScanRegions,
     NitePR5Error,
+    NoScan,
     NoTarget,
     NotConnected,
     ReadTooLarge,
+    ResultsTooMany,
+    ScanActive,
+    ScanUnsupported,
+    UndoTooLarge,
+)
+from .scan import (
+    alignment_or_default,
+    cap_get_count,
+    classify_maps,
+    hits_from_resident,
+    match_u32,
+    parse_compare,
+    parse_u32_value,
+    parse_value_type,
+    ranges_to_segments,
+    require_first_compare,
+    require_next_compare,
+    u32_from_bytes,
+    value_size,
 )
 from .transport import Ps5dbgTransport, Transport
-from .types import ForegroundInfo, MemoryMap, ProcessInfo
+from .types import ForegroundInfo, MemoryMap, ProcessInfo, ScanHit
+
+_LOG = logging.getLogger("nitepr5")
 
 
 def _is_pid(pid: object) -> bool:
     return isinstance(pid, int) and not isinstance(pid, bool) and pid >= 0
+
+
+@dataclass
+class _ScanState:
+    pid: int
+    value_type: int
+    alignment: int
+    engine: str  # "turbo" | "iterative" | "local"
+    count: int
+    segments: list[tuple[int, int]]
+    hits: list[ScanHit] | None = None
+    iterative_all: list[ScanHit] | None = None
+    undo_stack: list[tuple[int, list[ScanHit] | None]] = field(default_factory=list)
 
 
 class Session:
@@ -31,6 +97,9 @@ class Session:
         self._host: str | None = None
         self._target_pid: int | None = None
         self._maps_cache: dict[int, list[MemoryMap]] = {}
+        self._scan: _ScanState | None = None
+        self._busy = False
+        self._io = threading.RLock()
 
     def __enter__(self) -> Session:
         return self
@@ -63,6 +132,25 @@ class Session:
             raise NoTarget("no target pid; call attach_target(pid) or pass pid")
         return self._target_pid
 
+    def _begin_busy(self) -> None:
+        if self._busy:
+            raise ScanActive("scan operation already in flight")
+        self._busy = True
+
+    def _end_busy(self) -> None:
+        self._busy = False
+
+    @contextmanager
+    def _hold_io(self, *, block: bool = True) -> Iterator[None]:
+        """Serialize all TCP 744 use. Peephole reads fail fast during a scan."""
+        got = self._io.acquire(blocking=block)
+        if not got:
+            raise ScanActive("scan in flight; peephole paused")
+        try:
+            yield
+        finally:
+            self._io.release()
+
     def discover(self, *, timeout: float = 2.0) -> list[str]:
         """IPs from UDP 1010 (or the mock). Does not require TCP 744."""
         return self._transport.discover(timeout=timeout)
@@ -72,48 +160,62 @@ class Session:
         host = (host or "").strip()
         if not host:
             raise ConnectFailed("no PS5 host")
-        self.disconnect()
-        self._transport.connect(host, port=PS5DEBUG_PORT, timeout=CONNECT_TIMEOUT)
-        self._host = host
+        with self._hold_io():
+            self.disconnect()
+            self._transport.connect(host, port=PS5DEBUG_PORT, timeout=CONNECT_TIMEOUT)
+            self._host = host
 
     def disconnect(self) -> None:
-        self._transport.disconnect()
-        self._host = None
-        self._target_pid = None
-        self._maps_cache.clear()
+        with self._hold_io():
+            self._end_scan(silent=True)
+            self._transport.disconnect()
+            self._host = None
+            self._target_pid = None
+            self._maps_cache.clear()
 
     def processes(self) -> list[ProcessInfo]:
         """pid, name, and titleid when cheap (foreground pid or eboot.bin proc_info)."""
         self._require_connected()
-        procs = self._transport.procs()
-        title_by_pid: dict[int, str] = {}
-        try:
-            fg = self._transport.foreground_app()
-        except Exception:
-            fg = None
-        if fg is not None and fg.titleid:
-            title_by_pid[fg.pid] = fg.titleid
-        out: list[ProcessInfo] = []
-        for p in procs:
-            title = p.titleid or title_by_pid.get(p.pid, "")
-            if not title and p.name == EBOOT_NAME:
-                try:
-                    title = self._transport.proc_info(p.pid).titleid
-                except Exception:
-                    title = ""
-            out.append(ProcessInfo(pid=p.pid, name=p.name, titleid=title))
-        return out
+        with self._hold_io(block=False):
+            procs = self._transport.procs()
+            title_by_pid: dict[int, str] = {}
+            try:
+                fg = self._transport.foreground_app()
+            except Exception:
+                fg = None
+            if fg is not None and fg.titleid:
+                title_by_pid[fg.pid] = fg.titleid
+            out: list[ProcessInfo] = []
+            for p in procs:
+                title = p.titleid or title_by_pid.get(p.pid, "")
+                if not title and p.name == EBOOT_NAME:
+                    try:
+                        title = self._transport.proc_info(p.pid).titleid
+                    except Exception:
+                        title = ""
+                out.append(ProcessInfo(pid=p.pid, name=p.name, titleid=title))
+            return out
 
     def foreground(self) -> ForegroundInfo:
         """Foreground app. pid 0 is valid (home screen)."""
         self._require_connected()
-        return self._transport.foreground_app()
+        with self._hold_io(block=False):
+            return self._transport.foreground_app()
 
     def attach_target(self, pid: int) -> None:
-        """Remember pid for maps/read. Does NOT PT_ATTACH / debug_session().attach."""
+        """Remember pid for maps/read/scan. Does NOT PT_ATTACH / debug_session().attach.
+
+        Refuses a different pid while a scan is active (``ScanActive``). Same-pid
+        attach is a no-op. Use ``scan_undo()`` until the scan ends, then retarget.
+        """
         self._require_connected()
         if not _is_pid(pid):
             raise NoTarget(f"invalid pid: {pid!r}")
+        if self._scan is not None and pid != self._scan.pid:
+            raise ScanActive(
+                "cannot change attach_target while a scan is active; "
+                "scan_undo() until the scan ends"
+            )
         if self._target_pid is not None and pid != self._target_pid:
             self._maps_cache.clear()
         self._target_pid = pid
@@ -132,9 +234,10 @@ class Session:
         pid = self._resolve_pid(pid)
         if not refresh and pid in self._maps_cache:
             return list(self._maps_cache[pid])
-        rows = self._transport.maps(pid)
-        self._maps_cache[pid] = list(rows)
-        return list(rows)
+        with self._hold_io(block=False):
+            rows = self._transport.maps(pid)
+            self._maps_cache[pid] = list(rows)
+            return list(rows)
 
     def read(self, pid: int | None, addr: int, n: int) -> bytes:
         """Peephole read. Default pid is the attached target. Rejects n > 4096."""
@@ -146,4 +249,273 @@ class Session:
         pid = self._resolve_pid(pid)
         if not isinstance(addr, int) or isinstance(addr, bool):
             raise NitePR5Error(f"addr must be int, got {addr!r}")
-        return self._transport.read(pid, address=addr, length=n)
+        with self._hold_io(block=False):
+            return self._transport.read(pid, address=addr, length=n)
+
+    def _end_scan(self, *, silent: bool = False) -> None:
+        scan, self._scan = self._scan, None
+        if scan is None:
+            return
+        try:
+            self._transport.scan_end()
+        except Exception:
+            if not silent:
+                raise
+
+    def _scan_segments(self, pid: int, regions: str) -> list[tuple[int, int]]:
+        if regions != SCAN_REGIONS_DEFAULT:
+            raise InvalidScanRegions(regions)
+        # Classify from cached maps only. TURBOSCAN_REGIONS probe-reads 64 KiB
+        # from every readable region (CUSA13762 has ~370) including uncached
+        # GPU — that is a hitch, not a scan, and is why First Scan looked hung.
+        classified = classify_maps(self.maps(pid))
+        merged_segs = ranges_to_segments(classified)
+        if not merged_segs:
+            raise ScanUnsupported("no writable cached regions to scan")
+        total = sum(length for _addr, length in merged_segs)
+        _LOG.info(
+            "first scan: %s rw- segments, %.1f MiB (no region-probe)",
+            len(merged_segs),
+            total / (1024 * 1024),
+        )
+        return merged_segs
+
+    def _stash_if_small(self) -> None:
+        """Fetch and cache hits when count ≤ 256 so next-scan undo can restore them."""
+        assert self._scan is not None
+        if self._scan.hits is not None:
+            return
+        if self._scan.count == 0:
+            self._scan.hits = []
+            return
+        if self._scan.count > RESULTS_MAX:
+            return
+        if self._scan.engine == "turbo":
+            n = cap_get_count(RESULTS_MAX, self._scan.count)
+            rows = self._transport.scan_get_resident(
+                0, n, value_size(self._scan.value_type)
+            )
+            self._scan.hits = hits_from_resident(rows)
+        elif self._scan.iterative_all is not None:
+            self._scan.hits = list(self._scan.iterative_all[:RESULTS_MAX])
+
+    def _local_next(self, compare: int, value: int) -> int:
+        assert self._scan is not None
+        if self._scan.hits is None:
+            raise UndoTooLarge(self._scan.count)
+        size = value_size(self._scan.value_type)
+        nxt: list[ScanHit] = []
+        for hit in self._scan.hits:
+            current = self.read(self._scan.pid, hit.addr, size)
+            prev = hit.current
+            if match_u32(
+                compare,
+                u32_from_bytes(current),
+                u32_from_bytes(prev),
+                value,
+            ):
+                nxt.append(ScanHit(addr=hit.addr, current=current, previous=prev))
+        self._scan.hits = nxt
+        self._scan.count = len(nxt)
+        return self._scan.count
+
+    def scan_start(
+        self,
+        pid: int | None = None,
+        *,
+        value_type: str = "u32",
+        compare: str = "exact",
+        value: int | None = None,
+        alignment: int = SCAN_ALIGN_U32,
+        unknown: bool = False,
+        regions: str = SCAN_REGIONS_DEFAULT,
+    ) -> int:
+        """First scan. Returns the survivor count (not the hit list).
+
+        Defaults: UINT32, alignment 4, exact compare, writable+cached regions.
+        ``unknown`` must be explicit (or ``compare='unknown'``). Never defaults
+        to scanning all regions. Replaces an idle previous hunt (does not open
+        a second ``:744`` session). Raises ``ScanActive`` only if a scan op is
+        already in flight.
+        """
+        self._require_connected()
+        pid = self._resolve_pid(pid)
+        vt = parse_value_type(value_type)
+        align = alignment_or_default(alignment)
+        unknown_explicit = bool(unknown) or parse_compare(compare) == SCAN_COMPARE_UNKNOWN
+        if unknown_explicit:
+            ct = SCAN_COMPARE_UNKNOWN
+            parsed_value = parse_u32_value(value, required=False)
+        else:
+            ct = parse_compare(compare)
+            require_first_compare(ct)
+            parsed_value = parse_u32_value(value, required=True)
+        with self._hold_io():
+            self._end_scan(silent=True)
+            self._begin_busy()
+            try:
+                with self._transport.scan_wait():
+                    caps = self._transport.scan_caps()
+                    self._transport.scan_authenticate()
+                    have_turbo = caps is not None
+                    engines = caps[1] if caps is not None else 0
+                    segments = self._scan_segments(pid, regions)
+                    engine = "iterative"
+                    count = 0
+                    iterative_all: list[ScanHit] | None = None
+                    if have_turbo and (engines & TSE_SERVER_RESIDENT):
+                        if unknown_explicit and not (engines & TSE_SNAPSHOT):
+                            raise ScanUnsupported(
+                                "unknown first scan needs turbo snapshot; will not download RAM"
+                            )
+                        accepted, count = self._transport.scan_start_turbo(
+                            pid,
+                            segments,
+                            value_type=vt,
+                            compare_type=ct,
+                            alignment=align,
+                            value=parsed_value,
+                            unknown=unknown_explicit,
+                            engines=engines,
+                        )
+                        if accepted:
+                            engine = "turbo"
+                        elif unknown_explicit:
+                            raise ScanUnsupported(
+                                "unknown snapshot declined; will not download RAM"
+                            )
+                    if engine != "turbo":
+                        if unknown_explicit:
+                            raise ScanUnsupported(
+                                "unknown first scan is turbo-snapshot only (no iterative dump)"
+                            )
+                        iterative_all = self._transport.scan_start_iterative(
+                            pid,
+                            segments,
+                            value_type=vt,
+                            compare_type=ct,
+                            alignment=align,
+                            value=parsed_value,
+                        )
+                        count = len(iterative_all)
+                        engine = "iterative"
+                    self._scan = _ScanState(
+                        pid=pid,
+                        value_type=vt,
+                        alignment=align,
+                        engine=engine,
+                        count=count,
+                        segments=segments,
+                        iterative_all=iterative_all,
+                    )
+                    return count
+            finally:
+                self._end_busy()
+
+    def scan_next(self, *, compare: str, value: int | None = None) -> int:
+        """Narrow the active scan. Returns the new survivor count."""
+        self._require_connected()
+        if self._scan is None:
+            raise NoScan("no active scan")
+        ct = parse_compare(compare)
+        require_next_compare(ct)
+        parsed_value = parse_u32_value(value, required=(ct == SCAN_COMPARE_EXACT))
+        with self._hold_io():
+            self._begin_busy()
+            try:
+                with self._transport.scan_wait():
+                    self._stash_if_small()
+                    self._scan.undo_stack.append((self._scan.count, self._scan.hits))
+                    if self._scan.engine == "local":
+                        return self._local_next(ct, parsed_value)
+                    if self._scan.engine == "iterative":
+                        candidates = self._scan.iterative_all or []
+                        nxt = self._transport.scan_next_iterative(
+                            self._scan.pid,
+                            self._scan.segments,
+                            candidates,
+                            value_type=self._scan.value_type,
+                            compare_type=ct,
+                            value=parsed_value,
+                        )
+                        self._scan.iterative_all = nxt
+                        self._scan.hits = None
+                        self._scan.count = len(nxt)
+                        return self._scan.count
+                    count = self._transport.scan_count_resident(
+                        value_type=self._scan.value_type,
+                        compare_type=ct,
+                        value=parsed_value,
+                    )
+                    self._scan.hits = None
+                    self._scan.count = count
+                    return count
+            finally:
+                self._end_busy()
+
+    def scan_undo(self) -> int | None:
+        """Undo one generation. None means the scan ended (first-scan undo)."""
+        self._require_connected()
+        if self._scan is None:
+            raise NoScan("no active scan")
+        with self._hold_io():
+            self._begin_busy()
+            try:
+                with self._transport.scan_wait():
+                    if not self._scan.undo_stack:
+                        self._end_scan(silent=False)
+                        return None
+                    prev_count, prev_hits = self._scan.undo_stack[-1]
+                    if prev_count > RESULTS_MAX:
+                        raise UndoTooLarge(prev_count)
+                    self._scan.undo_stack.pop()
+                    self._scan.count = prev_count
+                    self._scan.hits = prev_hits if prev_hits is not None else []
+                    if self._scan.engine == "iterative":
+                        self._scan.iterative_all = list(self._scan.hits)
+                    else:
+                        try:
+                            self._transport.scan_end()
+                        except Exception:
+                            pass
+                        self._scan.engine = "local"
+                    return prev_count
+            finally:
+                self._end_busy()
+
+    def scan_count(self) -> int:
+        """Current survivor count. Does not fetch rows."""
+        self._require_connected()
+        if self._scan is None:
+            raise NoScan("no active scan")
+        return self._scan.count
+
+    def scan_results(self, limit: int = RESULTS_MAX) -> list[ScanHit]:
+        """At most ``limit`` hits. Fail closed above 256. Empty if count > 256."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise InvalidResultLimit(limit)
+        if limit > RESULTS_MAX:
+            raise ResultsTooMany(limit)
+        self._require_connected()
+        if self._scan is None:
+            raise NoScan("no active scan")
+        if self._scan.count > RESULTS_MAX:
+            return []
+        if self._scan.count == 0:
+            return []
+        if self._scan.hits is not None:
+            return list(self._scan.hits[:limit])
+        if self._scan.engine == "iterative" and self._scan.iterative_all is not None:
+            self._scan.hits = list(self._scan.iterative_all[:limit])
+            return list(self._scan.hits)
+        if self._scan.engine != "turbo":
+            return []
+        n = cap_get_count(limit, self._scan.count)
+        with self._hold_io():
+            with self._transport.scan_wait():
+                rows = self._transport.scan_get_resident(
+                    0, n, value_size(self._scan.value_type)
+                )
+        hits = hits_from_resident(rows)
+        self._scan.hits = hits
+        return list(hits[:limit])
