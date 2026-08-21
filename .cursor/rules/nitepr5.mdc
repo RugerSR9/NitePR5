@@ -5,7 +5,7 @@ alwaysApply: true
 
 # NitePR5
 
-Orchestrator: read `AGENTS.md`, `docs/STATUS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md`. Spawn workers with the ORCHESTRATION preamble. Do not skip the active phase.
+Orchestrator: read `AGENTS.md`, `docs/STATUS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md`, `docs/HANDOFF.md`. Spawn workers with the ORCHESTRATION preamble plus HANDOFF facts. Do not skip the active phase.
 
 - Memory only via `ps5dbg` → PS5Debug `:744`. No protocol reimplementation, no `PT_ATTACH` on games.
 - etaHEN plugin ≠ overlay. No `plugin/` before phase 4, no `overlay/` before phase 5.

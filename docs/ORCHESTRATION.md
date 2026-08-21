@@ -2,7 +2,7 @@
 
 Handoff for a **parent agent** that spawns sub-agents. Workers have **no prior chat**. Every spawn must be a self-contained brief.
 
-Architecture and exit tests live in [ARCHITECTURE.md](ARCHITECTURE.md). Current phase lives in [STATUS.md](STATUS.md). Parent instructions live in [../AGENTS.md](../AGENTS.md).
+Architecture and exit tests live in [ARCHITECTURE.md](ARCHITECTURE.md). Current phase lives in [STATUS.md](STATUS.md). Parent instructions live in [../AGENTS.md](../AGENTS.md). Completed-phase facts live in [HANDOFF.md](HANDOFF.md) — paste the relevant blocks into every worker prompt.
 
 ## 1. Parent vs worker
 
