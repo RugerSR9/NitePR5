@@ -8,11 +8,13 @@ A memory editor for a jailbroken PS5. The name reserves original PSP **NitePR** 
 |---|---|
 | Console | PS5, firmware **9.60** |
 | HEN | **etaHEN only** (do not stack OnionHEN, Kylin Core, CheatRunner, PHU Tools) |
-| Debugger | **PS5Debug** (ps5debug-NG), enabled in etaHEN |
+| Debugger | **ps5debug-NG** (OpenSourcereR), sent to etaHEN **elfldr :9021** — not the Toolbox toggle |
 | First test titles | PS4 games running on PS5 (`CUSA*`). Native PS5 (`PPSA*`) after overlay exists. |
 | Dev PC | Windows, same LAN as the console |
 
-PS5Debug listens on **TCP 744** (commands), **755** (debug interrupts), **UDP 1010** (LAN discovery). Rest mode drops 744; clients must reconnect after wake.
+ps5debug-NG listens on **TCP 744** (commands), **755** (debug interrupts), **UDP 1010** (LAN discovery). Rest mode drops 744; clients must reconnect after wake.
+
+On **FW 8.00+** (including **9.60**), etaHEN’s Toolbox / Debug Settings **PS5Debug** switch is the old bundled Sistr0/CTN blob. The daemon sets `no_ps5debug` when `fw_ver >= 0x800` and the UI reports that firmware is unsupported. That is expected. Load **ps5debug-NG** `ps5debug-NG_v1.3.0.elf` (or newer) through etaHEN elfldr on **TCP 9021**, or via Toolbox **Plugin / Payload ELF**. Do not enable `PS5Debug=1` in `config.ini` on this firmware — that autoloads the same old blob.
 
 ## 2. What this product is
 
@@ -72,7 +74,7 @@ PSP had tens of MB. PS5 games have gigabytes, and some regions are uncached (~40
 
 | Layer | Choice | Why |
 |---|---|---|
-| Memory backend | **ps5debug-NG** as already loaded by etaHEN | Firmware-ported scan, R/W, maps, freeze-friendly bulk write |
+| Memory backend | **ps5debug-NG** loaded via etaHEN elfldr | Firmware-ported scan, R/W, maps, freeze-friendly bulk write |
 | PC protocol client | Python **`ps5dbg`** | Full v1.3.0 coverage; do not reimplement the wire protocol |
 | Web app | **Python 3.10+**, FastAPI (HTTP + WebSocket), vanilla JS in `web/static` | Fast to iterate on Windows; no Node toolchain required for v1 |
 | Console plugin (later) | **C**, [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk), etaHEN plugin CMake | Matches how plugins are actually loaded |
@@ -270,7 +272,7 @@ Example: `CUSA00004_01.07.json`
 | Port | Owner | NitePR5 uses it? |
 |---|---|---|
 | 744 / 755 / 1010 / 3232 | PS5Debug | Yes (client) |
-| 9021 | etaHEN elfldr | Deploy plugin only |
+| 9021 | etaHEN elfldr | Send `ps5debug-NG.elf` (Phase 0); deploy plugin later |
 | 9028 | etaHEN jailbreak IPC | Plugin privilege, Phase 4 |
 | 1337 / 9081 / 9090 / 12800 | etaHEN optional services | No |
 | **1744** | NitePR5 web (PC localhost, later optional console) | Yes |
@@ -307,7 +309,7 @@ Phase 6  Broker + optional console-hosted web     ← backlog unless needed
 
 **Job:** prove the console is the stack we designed for.
 
-- etaHEN running, PS5Debug enabled, PC can ping the PS5
+- etaHEN running; **ps5debug-NG** loaded via elfldr **9021** (not the Toolbox PS5Debug toggle); PC can ping the PS5
 - No second cheat injector loaded
 - Note the PS5 LAN IP and a PS4-on-PS5 test title you own
 
@@ -395,3 +397,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-20 | Product name is **NitePR5**. Original PSP NitePR stays the namesake only. Paths and module names use `nitepr5`. |
 | 2026-08-20 | Performance contract: burst turbo scan on-console, watch list for live data, hex peephole, skip uncached/XOM, hard caps in §5.3. |
 | 2026-08-20 | Orchestration handoff: `AGENTS.md`, `docs/ORCHESTRATION.md`, `docs/STATUS.md`, `.cursor/rules/nitepr5.mdc`. |
+| 2026-08-21 | FW 8.00+: do not use etaHEN Toolbox “PS5Debug” (old Sistr0/CTN, firmware-gated). Load OpenSourcereR **ps5debug-NG** via elfldr 9021. |
