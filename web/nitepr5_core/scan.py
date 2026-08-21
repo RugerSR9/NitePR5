@@ -23,10 +23,12 @@ from .constants import (
     SCAN_SEGMENT_MAX,
     SCAN_SEGMENT_MIN,
     SCAN_VALUE_UINT32,
+    SNAP_BITMAP_MAX,
     TS_SERVER_RESIDENT,
     TS_SNAPSHOT,
     TS_SNAPSHOT_SEGMENTS,
     TS_USE_ALIASING,
+    UNCACHED_MAP_NAMES,
 )
 from .errors import InvalidScanCompare, InvalidScanValue, ScanUnsupported
 from .types import ScanHit, ScanRegion
@@ -67,6 +69,13 @@ _NEXT_SCAN_COMPARES = frozenset(
 _U32_SIZE = 4
 _SENTINEL_U64 = 0xFFFFFFFFFFFFFFFF
 _SNAPSHOT_PROGRESS_MAX = 10_000_000
+_RESULT_BLOCK_MAX = 16 * 1024 * 1024
+
+TOO_MANY_MATCHES = (
+    "too many exact matches to keep on the console (256 MiB resident list). "
+    "Change the value in-game and First Scan a less common number — "
+    "will not download the hit list"
+)
 
 
 def parse_value_type(name: str) -> int:
@@ -189,13 +198,15 @@ def classify_maps(maps) -> list[tuple[int, int]]:
 
     Fallback when TURBOSCAN_REGIONS is unavailable. No uncached bit on
     ``MemoryMap`` — prefer ``classify_turbo_regions`` after a 1-byte probe.
-    Skip r-x code and rwx.
+    Skip r-x code, rwx, and known GPU names (SceGnm) even without PCD.
     """
     out: list[tuple[int, int]] = []
     for m in maps:
         if not (m.prot & PROT_WRITE):
             continue
         if m.prot & PROT_EXEC:
+            continue
+        if m.name in UNCACHED_MAP_NAMES:
             continue
         out.append((m.start, m.end))
     return out
@@ -223,6 +234,54 @@ def turbo_start_flags(*, snapshot: bool, use_aliasing: bool) -> int:
     if use_aliasing:
         flags |= TS_USE_ALIASING
     return flags
+
+
+def snapshot_bitmap_bytes(
+    segments: list[tuple[int, int]],
+    *,
+    value_size: int = _U32_SIZE,
+    alignment: int = SCAN_ALIGN_U32,
+) -> int:
+    """ps5debug-NG membership bitmap size (always RAM)."""
+    step = alignment if alignment > 0 else value_size
+    slots = 0
+    for _addr, length in segments:
+        if length >= value_size:
+            slots += (length - value_size) // step + 1
+    return (slots + 7) >> 3
+
+
+def snapshot_fits(
+    segments: list[tuple[int, int]],
+    *,
+    value_size: int = _U32_SIZE,
+    alignment: int = SCAN_ALIGN_U32,
+) -> bool:
+    return snapshot_bitmap_bytes(
+        segments, value_size=value_size, alignment=alignment
+    ) <= SNAP_BITMAP_MAX
+
+
+def drain_result_blocks(conn) -> None:
+    """Discard TURBOSCAN result blocks (u64 length + payload) until sentinel.
+
+    Segmented resident overflow sends an empty stream (immediate sentinel).
+    Single-range overflow can stream full hits — we drop the payload so :744
+    stays in sync and we never keep the list. Do not use _recv_u64_stream:
+    that treats block_len as a bare u64 and desyncs the socket.
+    """
+    from ps5dbg.wire import recv_u64
+
+    while True:
+        block_len = recv_u64(conn)
+        if block_len == _SENTINEL_U64:
+            return
+        if block_len > _RESULT_BLOCK_MAX:
+            raise ScanUnsupported(
+                f"refusing to drain a {block_len} byte scan block "
+                f"(max {_RESULT_BLOCK_MAX}); reconnect if :744 is stuck"
+            )
+        conn.recv_exact(int(block_len))
 
 
 def hits_from_resident(
@@ -288,7 +347,7 @@ def turbo_start_resident_segments(
     """
     import ps5dbg.turboscan as ts
     from ps5dbg.constants import Cmd
-    from ps5dbg.protocol import _recv_u64_stream, _scan_value_bytes
+    from ps5dbg.protocol import _scan_value_bytes
     from ps5dbg.wire import expect_success
 
     vbytes = _scan_value_bytes(value_type, value)
@@ -298,7 +357,7 @@ def turbo_start_resident_segments(
     _send_segments(conn, segments)
     resident_stored, count = struct.unpack("<IQ", conn.recv_exact(12))
     if resident_stored == 0:
-        _recv_u64_stream(conn)
+        drain_result_blocks(conn)
     expect_success(conn, context="CMD_PROC_TURBOSCAN_START segmented resident (final)")
     return resident_stored, count
 
@@ -352,7 +411,11 @@ def turbo_start_snapshot_segments(
         raise ScanUnsupported(f"unsafe snapshot trailer: {exc}") from exc
     expect_success(conn, context="CMD_PROC_TURBOSCAN_START snapshot (final)")
     if snapshot_ok == 0:
-        raise ScanUnsupported("server declined unknown snapshot (snapshot_ok=0)")
+        raise ScanUnsupported(
+            "console declined the snapshot (ENOSPC / bitmap too large / "
+            "/data full). Change the value in-game and First Scan a less "
+            "common number; reconnect if the next command times out"
+        )
     return survivor_count
 
 

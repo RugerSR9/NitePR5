@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .constants import READ_MAX
+from .constants import FREEZE_MAX, READ_MAX, WATCH_MAX, WRITE_MAX
 
 REST_MODE_HINT = (
     "Could not reach PS5Debug on TCP 744. Rest mode drops this socket — "
@@ -120,3 +120,87 @@ class InvalidScanValue(NitePR5Error):
 
 class InvalidScanCompare(NitePR5Error):
     """Unknown compare name, or a compare that is not valid for this step."""
+
+
+class InvalidWriteSize(NitePR5Error):
+    """write() data is empty or not bytes."""
+
+    def __init__(self, n: object) -> None:
+        self.n = n
+        super().__init__(f"write data must be non-empty bytes, got {n!r}")
+
+
+class WriteTooLarge(NitePR5Error):
+    """write() length exceeds WRITE_MAX (same 4 KiB cap as read)."""
+
+    def __init__(self, n: int, max_n: int | None = None) -> None:
+        self.n = n
+        self.max_n = WRITE_MAX if max_n is None else max_n
+        super().__init__(
+            f"write length {n} exceeds max {self.max_n} (fail closed; "
+            f"hex poke / freeze patches are small)"
+        )
+
+
+class InvalidWatchSize(NitePR5Error):
+    """watch_add n is not 1, 2, 4, or 8."""
+
+    def __init__(self, n: object) -> None:
+        self.n = n
+        super().__init__(f"watch size must be 1, 2, 4, or 8, got {n!r}")
+
+
+class InvalidFreezeSize(NitePR5Error):
+    """freeze_add data length is not 1..8 bytes."""
+
+    def __init__(self, n: object) -> None:
+        self.n = n
+        super().__init__(f"freeze data length must be 1..8 bytes, got {n!r}")
+
+
+class WatchLimit(NitePR5Error):
+    """watch_add refused: list already has WATCH_MAX entries."""
+
+    def __init__(self, n: int | None = None) -> None:
+        self.max_n = WATCH_MAX if n is None else n
+        super().__init__(f"watch list is full ({self.max_n} max)")
+
+
+class FreezeLimit(NitePR5Error):
+    """freeze_add refused: list already has FREEZE_MAX entries."""
+
+    def __init__(self, n: int | None = None) -> None:
+        self.max_n = FREEZE_MAX if n is None else n
+        super().__init__(f"freeze list is full ({self.max_n} max)")
+
+
+class NoWatch(NitePR5Error):
+    """watch_remove id is not on the list."""
+
+    def __init__(self, watch_id: object) -> None:
+        self.watch_id = watch_id
+        super().__init__(f"no watch with id {watch_id!r}")
+
+
+class NoFreeze(NitePR5Error):
+    """freeze_remove id is not on the list."""
+
+    def __init__(self, freeze_id: object) -> None:
+        self.freeze_id = freeze_id
+        super().__init__(f"no freeze with id {freeze_id!r}")
+
+
+class InvalidCheat(NitePR5Error):
+    """GoldHEN JSON schema or hex patch is invalid."""
+
+
+class NoCheat(NitePR5Error):
+    """cheat_toggle / cheat_save called with no loaded cheat file."""
+
+
+class NoMod(NitePR5Error):
+    """cheat_toggle name is not in the loaded cheat."""
+
+    def __init__(self, name: object) -> None:
+        self.name = name
+        super().__init__(f"no cheat mod named {name!r}")

@@ -28,14 +28,23 @@ from .constants import (
     TSE_SERVER_RESIDENT,
     TSE_SNAPSHOT,
     TSE_SNAPSHOT_SEGMENTS,
+    WRITE_MAX,
 )
-from .errors import ConnectFailed, InvalidReadSize, NotConnected, ReadTooLarge, ScanUnsupported
+from .errors import (
+    ConnectFailed,
+    InvalidReadSize,
+    InvalidWriteSize,
+    NotConnected,
+    ReadTooLarge,
+    ScanUnsupported,
+    WriteTooLarge,
+)
 from .scan import match_u32, u32_from_bytes, value_size
 from .types import ForegroundInfo, MemoryMap, ProcessDetail, ProcessInfo, ScanHit, ScanRegion
 
 
 class Transport(ABC):
-    """Inspection + turbo/iterative scan. write / freeze / cheats live elsewhere."""
+    """Inspection, peephole R/W, turbo/iterative scan. One :744 connection."""
 
     @property
     @abstractmethod
@@ -78,6 +87,11 @@ class Transport(ABC):
 
     @abstractmethod
     def read(self, pid: int, address: int, length: int) -> bytes:
+        ...
+
+    @abstractmethod
+    def write(self, pid: int, address: int, data: bytes) -> None:
+        """Write process memory. Keyword on the real client is ``address=``."""
         ...
 
     @contextmanager
@@ -296,7 +310,8 @@ class Ps5dbgTransport(Transport):
             return fn(*args, **kwargs)
         except ConnectionLost as exc:
             raise NotConnected(
-                f"{exc}. Rest mode drops TCP 744; wake the console and reconnect."
+                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
+                "Rest mode also drops this socket."
             ) from exc
         except PS5DbgError as exc:
             from .errors import NitePR5Error
@@ -349,6 +364,16 @@ class Ps5dbgTransport(Transport):
         # TRAP: ps5dbg README says addr=; the real kwarg is address=.
         return self._call(ps5.read, pid, address=address, length=length)
 
+    def write(self, pid: int, address: int, data: bytes) -> None:
+        if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
+            raise InvalidWriteSize(0 if isinstance(data, (bytes, bytearray)) else data)
+        if len(data) > WRITE_MAX:
+            raise WriteTooLarge(len(data))
+        ps5 = self._require()
+        # Same trap as read: keyword is address=, not addr=.
+        # Do not reimplement PROC_WRITE_MULTI; ps5dbg 0.1.1 loops proc_write.
+        self._call(ps5.write, pid, address=address, data=bytes(data))
+
     def scan_caps(self) -> tuple[int, int, int] | None:
         import ps5dbg.turboscan as ts
         from ps5dbg.errors import BadStatus, ConnectionLost, PS5DbgError
@@ -361,7 +386,8 @@ class Ps5dbgTransport(Transport):
             return None
         except ConnectionLost as exc:
             raise NotConnected(
-                f"{exc}. Rest mode drops TCP 744; wake the console and reconnect."
+                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
+                "Rest mode also drops this socket."
             ) from exc
         except PS5DbgError as exc:
             from .errors import NitePR5Error
@@ -439,7 +465,23 @@ class Ps5dbgTransport(Transport):
                     return True, count
                 if not (engines & TSE_SERVER_RESIDENT):
                     return False, 0
-                if len(segments) == 1:
+                # Always segmented, even for one range. Single-range resident
+                # overflow streams the full hit list (desync if drained as
+                # u64s). Segmented overflow is an empty sentinel only.
+                if not (engines & TSE_SNAPSHOT_SEGMENTS) and len(segments) != 1:
+                    return False, 0
+                if engines & TSE_SNAPSHOT_SEGMENTS:
+                    stored, count = turbo_start_resident_segments(
+                        conn,
+                        pid,
+                        segments,
+                        value_type,
+                        compare_type,
+                        alignment,
+                        value,
+                        use_aliasing=use_aliasing,
+                    )
+                else:
                     addr, length = segments[0]
                     flags = ts.TS_SERVER_RESIDENT
                     if use_aliasing:
@@ -455,31 +497,20 @@ class Ps5dbgTransport(Transport):
                         value,
                         flags=flags,
                     )
-                    if stored == 0:
-                        return False, count
-                    self._turbo_open = True
-                    return True, count
-                if not (engines & TSE_SNAPSHOT_SEGMENTS):
-                    return False, 0
-                stored, count = turbo_start_resident_segments(
-                    conn,
-                    pid,
-                    segments,
-                    value_type,
-                    compare_type,
-                    alignment,
-                    value,
-                    use_aliasing=use_aliasing,
-                )
                 if stored == 0:
                     return False, count
                 self._turbo_open = True
                 return True, count
         except ScanUnsupported:
+            try:
+                self.scan_end()
+            except Exception:
+                pass
             raise
         except ConnectionLost as exc:
             raise NotConnected(
-                f"{exc}. Rest mode drops TCP 744; wake the console and reconnect."
+                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
+                "Rest mode also drops this socket."
             ) from exc
         except PS5DbgError as exc:
             from .errors import NitePR5Error
@@ -665,6 +696,7 @@ class MockTransport(Transport):
         self.fail_regions_probe = False
         self.last_use_aliasing = False
         self.last_rescan_aliasing = False
+        self.write_calls: list[tuple[int, int, bytes]] = []
         self._scan_authed = False
         self._turbo_open = False
         self._rescan_aliasing = False
@@ -804,6 +836,19 @@ class MockTransport(Transport):
             if 0 <= off < len(self._ram):
                 out[i] = self._ram[off]
         return bytes(out)
+
+    def write(self, pid: int, address: int, data: bytes) -> None:
+        self._require()
+        if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
+            raise InvalidWriteSize(0 if isinstance(data, (bytes, bytearray)) else data)
+        if len(data) > WRITE_MAX:
+            raise WriteTooLarge(len(data))
+        payload = bytes(data)
+        self.write_calls.append((pid, address, payload))
+        for i, byte in enumerate(payload):
+            off = address + i - self.RAM_BASE
+            if 0 <= off < len(self._ram):
+                self._ram[off] = byte
 
     def scan_caps(self) -> tuple[int, int, int] | None:
         self._require()

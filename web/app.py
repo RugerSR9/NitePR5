@@ -1,4 +1,4 @@
-"""NitePR5 Phase 1–2 web app — FastAPI bound to nitepr5-core Session.
+"""NitePR5 Phase 1–3 web app — FastAPI bound to nitepr5-core Session.
 
 JSON shapes match the session API so the vanilla JS client keeps working.
 NITEPR5_MOCK=1 uses MockTransport (pytest / local UI without a PS5).
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -20,18 +21,29 @@ from nitepr5_core import (
     RESULTS_MAX,
     SCAN_ALIGN_U32,
     SCAN_REGIONS_DEFAULT,
+    WATCH_SIZE_DEFAULT,
     ConnectFailed,
+    FreezeEntry,
+    FreezeLimit,
     ForegroundInfo,
+    InvalidCheat,
+    InvalidFreezeSize,
     InvalidReadSize,
     InvalidResultLimit,
     InvalidScanCompare,
     InvalidScanRegions,
     InvalidScanValue,
+    InvalidWatchSize,
+    InvalidWriteSize,
     MemoryMap,
     MockTransport,
     NitePR5Error,
+    NoCheat,
+    NoFreeze,
+    NoMod,
     NoScan,
     NoTarget,
+    NoWatch,
     NotConnected,
     ProcessInfo,
     ReadTooLarge,
@@ -42,10 +54,18 @@ from nitepr5_core import (
     ScanUnsupported,
     Session,
     UndoTooLarge,
+    WatchEntry,
+    WatchLimit,
+    WatchValue,
+    WriteTooLarge,
     resolve_host,
 )
+from nitepr5_core.cheat import cheat_to_dict, parse_cheat_dict
 
 STATIC = Path(__file__).resolve().parent / "static"
+CHEATS_DIR = Path(__file__).resolve().parent / "cheats"
+_CHEAT_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.json$")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 logging.getLogger("nitepr5").setLevel(logging.INFO)
 
@@ -89,6 +109,37 @@ class ScanNextBody(BaseModel):
     value: int | None = None
 
 
+class WriteBody(BaseModel):
+    addr: int
+    data: str
+    pid: int | None = None
+
+
+class WatchBody(BaseModel):
+    addr: int
+    n: int = WATCH_SIZE_DEFAULT
+    label: str = ""
+
+
+class FreezeBody(BaseModel):
+    addr: int
+    data: str
+
+
+class CheatLoadBody(BaseModel):
+    filename: str
+
+
+class CheatSaveBody(BaseModel):
+    filename: str
+    cheat: dict | None = None
+
+
+class CheatToggleBody(BaseModel):
+    name: str
+    enabled: bool
+
+
 _HTTP_400 = (
     NoTarget,
     ReadTooLarge,
@@ -103,6 +154,17 @@ _HTTP_400 = (
     InvalidScanRegions,
     InvalidScanValue,
     InvalidScanCompare,
+    WatchLimit,
+    FreezeLimit,
+    NoWatch,
+    NoFreeze,
+    InvalidWriteSize,
+    WriteTooLarge,
+    InvalidWatchSize,
+    InvalidFreezeSize,
+    InvalidCheat,
+    NoCheat,
+    NoMod,
 )
 
 
@@ -138,6 +200,60 @@ def _hit_json(hit: ScanHit) -> dict:
         "current": hit.current.hex(),
         "previous": None if hit.previous is None else hit.previous.hex(),
     }
+
+
+def _hex_bytes(raw: str) -> bytes:
+    """Decode a no-separator hex string. Empty / odd / non-hex → InvalidWriteSize."""
+    if not isinstance(raw, str):
+        raise InvalidWriteSize(raw)
+    s = raw.strip()
+    if not s or len(s) % 2 != 0 or any(c not in _HEX_DIGITS for c in s):
+        raise InvalidWriteSize(s if s else raw)
+    return bytes.fromhex(s)
+
+
+def _watch_json(entry: WatchEntry) -> dict:
+    return {
+        "id": entry.id,
+        "pid": entry.pid,
+        "addr": entry.addr,
+        "n": entry.n,
+        "label": entry.label,
+    }
+
+
+def _watch_value_json(sample: WatchValue) -> dict:
+    return {"id": sample.id, "addr": sample.addr, "data": sample.data.hex()}
+
+
+def _freeze_json(entry: FreezeEntry) -> dict:
+    return {
+        "id": entry.id,
+        "pid": entry.pid,
+        "addr": entry.addr,
+        "data": entry.data.hex(),
+    }
+
+
+def _cheat_payload() -> dict:
+    cheat = SESSION.loaded_cheat()
+    return {
+        "cheat": None if cheat is None else cheat_to_dict(cheat),
+        "enabled": SESSION.cheat_enabled_names(),
+    }
+
+
+def _cheat_path(filename: str) -> Path:
+    if not isinstance(filename, str):
+        raise InvalidCheat(f"invalid cheat filename: {filename!r}")
+    name = filename.strip()
+    if not _CHEAT_FILENAME_RE.fullmatch(name):
+        raise InvalidCheat(f"invalid cheat filename: {filename!r}")
+    base = CHEATS_DIR.resolve()
+    dest = (CHEATS_DIR / name).resolve()
+    if dest.parent != base:
+        raise InvalidCheat(f"invalid cheat filename: {filename!r}")
+    return dest
 
 
 @app.exception_handler(NitePR5Error)
@@ -255,6 +371,97 @@ def api_scan_results(limit: int = Query(RESULTS_MAX)) -> dict:
     count = SESSION.scan_count()
     hits = SESSION.scan_results(limit)
     return {"count": count, "results": [_hit_json(h) for h in hits]}
+
+
+@app.post("/api/write")
+def api_write(body: WriteBody) -> dict:
+    data = _hex_bytes(body.data)
+    SESSION.write(body.pid, body.addr, data)
+    return {"ok": True, "addr": body.addr, "n": len(data)}
+
+
+@app.post("/api/watch")
+def api_watch_add(body: WatchBody) -> dict:
+    entry = SESSION.watch_add(addr=body.addr, n=body.n, label=body.label)
+    return _watch_json(entry)
+
+
+@app.get("/api/watch/poll")
+def api_watch_poll() -> dict:
+    return {"values": [_watch_value_json(v) for v in SESSION.watch_poll()]}
+
+
+@app.get("/api/watch")
+def api_watch_list() -> dict:
+    return {"watches": [_watch_json(w) for w in SESSION.watches()]}
+
+
+@app.delete("/api/watch/{id}")
+def api_watch_remove(id: int) -> dict:
+    SESSION.watch_remove(id)
+    return {"ok": True}
+
+
+@app.post("/api/freeze")
+def api_freeze_add(body: FreezeBody) -> dict:
+    data = _hex_bytes(body.data)
+    entry = SESSION.freeze_add(addr=body.addr, data=data)
+    return _freeze_json(entry)
+
+
+@app.post("/api/freeze/tick")
+def api_freeze_tick() -> dict:
+    return {"written": SESSION.freeze_tick()}
+
+
+@app.get("/api/freeze")
+def api_freeze_list() -> dict:
+    return {"freezes": [_freeze_json(f) for f in SESSION.freezes()]}
+
+
+@app.delete("/api/freeze/{id}")
+def api_freeze_remove(id: int) -> dict:
+    SESSION.freeze_remove(id)
+    return {"ok": True}
+
+
+@app.get("/api/cheats")
+def api_cheats() -> dict:
+    if not CHEATS_DIR.is_dir():
+        return {"files": []}
+    names = [
+        p.name
+        for p in CHEATS_DIR.iterdir()
+        if p.is_file() and _CHEAT_FILENAME_RE.fullmatch(p.name)
+    ]
+    names.sort()
+    return {"files": names}
+
+
+@app.post("/api/cheat/load")
+def api_cheat_load(body: CheatLoadBody) -> dict:
+    cheat = SESSION.cheat_load(_cheat_path(body.filename))
+    return {"cheat": cheat_to_dict(cheat), "enabled": SESSION.cheat_enabled_names()}
+
+
+@app.post("/api/cheat/save")
+def api_cheat_save(body: CheatSaveBody) -> dict:
+    dest = _cheat_path(body.filename)
+    parsed = parse_cheat_dict(body.cheat) if body.cheat is not None else None
+    CHEATS_DIR.mkdir(parents=True, exist_ok=True)
+    SESSION.cheat_save(dest, parsed)
+    return {"ok": True, "filename": dest.name}
+
+
+@app.post("/api/cheat/toggle")
+def api_cheat_toggle(body: CheatToggleBody) -> dict:
+    SESSION.cheat_toggle(body.name, body.enabled)
+    return {"ok": True, "name": body.name, "enabled": body.enabled}
+
+
+@app.get("/api/cheat")
+def api_cheat() -> dict:
+    return _cheat_payload()
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")

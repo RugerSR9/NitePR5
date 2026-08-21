@@ -14,6 +14,17 @@ SCAN_IO_TIMEOUT: float | None = None
 # Hex peephole: UI default 512 B, fail closed above 4 KiB (ARCHITECTURE §5.3).
 HEX_PEEPHOLE_DEFAULT = 512
 READ_MAX = 4096
+WRITE_MAX = READ_MAX
+
+# Watch list: user-pinned addresses only. UI polls ~10 Hz; core has no timer.
+WATCH_MAX = 64
+WATCH_SIZES = frozenset({1, 2, 4, 8})
+WATCH_SIZE_DEFAULT = 4
+
+# Freeze list: UI ticks ~15 Hz; core freeze_tick writes once per call.
+FREEZE_MAX = 32
+FREEZE_SIZE_MIN = 1
+FREEZE_SIZE_MAX = 8
 
 # Scan results: count-first UI; never fetch more than this many rows.
 RESULTS_MAX = 256
@@ -53,6 +64,13 @@ SCAN_REGIONS_PROBE_BYTES = 1
 # Segmented TURBOSCAN_START: u32 count then count × {u64 addr; u32 length}.
 SCAN_SEGMENT_MIN = 1
 SCAN_SEGMENT_MAX = 1_048_576
+
+# ps5debug-NG TS_SNAP_BITMAP_MAX. Membership bitmap is always RAM; above this
+# the server replies snapshot_ok=0 (ENOSPC / too large).
+SNAP_BITMAP_MAX = 448 * 1024 * 1024
+
+# Name heuristic when TURBOSCAN_REGIONS is missing (no PCD bit on maps()).
+UNCACHED_MAP_NAMES = frozenset({"SceGnm"})
 
 PROT_READ = 1
 PROT_WRITE = 2

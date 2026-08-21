@@ -73,3 +73,62 @@ class ScanRegion:
     end: int
     prot: int
     uncached: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WatchEntry:
+    """One pinned watch. UI polls; core does not start a thread."""
+
+    id: int
+    pid: int
+    addr: int
+    n: int
+    label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class WatchValue:
+    """One watch_poll sample. data is raw little-endian bytes."""
+
+    id: int
+    addr: int
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class FreezeEntry:
+    """One frozen address. UI ticks freeze_tick; core has no 15 Hz loop."""
+
+    id: int
+    pid: int
+    addr: int
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class CheatPatch:
+    """One GoldHEN memory patch. offset is a hex string; on/off are raw bytes."""
+
+    offset: str
+    on: bytes
+    off: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class CheatMod:
+    name: str
+    description: str
+    type: str
+    memory: list[CheatPatch]
+
+
+@dataclass(frozen=True, slots=True)
+class CheatFile:
+    """GoldHEN JSON cheat. id is the title id (CUSA…)."""
+
+    name: str
+    id: str
+    version: str
+    process: str
+    mods: list[CheatMod]
+    credits: list[str]

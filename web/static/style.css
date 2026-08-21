@@ -142,7 +142,22 @@ table.hex .addr { color: var(--accent); }
 table.hex .bytes { color: var(--hex); }
 table.hex .ascii { color: var(--ascii); }
 
+table.hex span.byte {
+  display: inline-block;
+  min-width: 1.35em;
+  padding: 0 0.08em;
+  cursor: pointer;
+  border-radius: 2px;
+}
+table.hex span.byte:hover { background: #3a4a5c; }
+table.hex span.byte.selected {
+  background: #3d5a38;
+  outline: 1px solid #6a9;
+}
+
 .hex-wrap { max-height: 38rem; overflow: auto; }
+.poke-toolbar { margin-top: -0.15rem; }
+.poke-toolbar input[type="text"] { min-width: 8rem; }
 
 .scan-controls {
   display: flex;
@@ -159,3 +174,28 @@ table.hex .ascii { color: var(--ascii); }
 }
 
 .scan-wrap { max-height: 18rem; overflow: auto; }
+
+#hex-panel tbody tr { cursor: default; }
+#watch-panel tbody tr,
+#freeze-panel tbody tr { cursor: default; }
+#cheat-panel tbody tr { cursor: default; }
+
+button.btn-row {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.8rem;
+}
+
+.cheat-mods {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  margin-bottom: 0.6rem;
+  min-height: 2rem;
+}
+
+.cheat-mods .check { color: var(--text); }
+.cheat-mods .mod-desc { color: var(--muted); font-size: 0.85rem; margin-left: 0.35rem; }
