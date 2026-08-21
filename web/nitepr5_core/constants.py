@@ -34,12 +34,21 @@ SCAN_COMPARE_UNKNOWN = 11
 
 # Turbo engine bits / request flags (ps5dbg.turboscan). Duplicated so Session
 # can classify without importing ps5dbg.
+TSE_ALIASING = 0x02
 TSE_SERVER_RESIDENT = 0x04
 TSE_SNAPSHOT = 0x08
 TSE_SNAPSHOT_SEGMENTS = 0x10
+TSE_RESCAN_ALIASING = 0x200
+TS_USE_ALIASING = 0x01
 TS_SERVER_RESIDENT = 0x02
 TS_SNAPSHOT = 0x04
 TS_SNAPSHOT_SEGMENTS = 0x10
+TS_PARALLEL_COMPARE = 0x80
+TS_RESCAN_ALIASING = 0x100
+
+# TURBOSCAN_REGIONS: 0 means server default 64 KiB per readable map (hangs).
+# 1 byte still returns the leaf-PTE PCD (uncached) bit.
+SCAN_REGIONS_PROBE_BYTES = 1
 
 # Segmented TURBOSCAN_START: u32 count then count × {u64 addr; u32 length}.
 SCAN_SEGMENT_MIN = 1

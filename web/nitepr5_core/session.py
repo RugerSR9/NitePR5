@@ -33,6 +33,7 @@ from .constants import (
     SCAN_COMPARE_EXACT,
     SCAN_COMPARE_UNKNOWN,
     SCAN_REGIONS_DEFAULT,
+    SCAN_REGIONS_PROBE_BYTES,
     TSE_SERVER_RESIDENT,
     TSE_SNAPSHOT,
 )
@@ -55,6 +56,7 @@ from .scan import (
     alignment_or_default,
     cap_get_count,
     classify_maps,
+    classify_turbo_regions,
     hits_from_resident,
     match_u32,
     parse_compare,
@@ -265,18 +267,25 @@ class Session:
     def _scan_segments(self, pid: int, regions: str) -> list[tuple[int, int]]:
         if regions != SCAN_REGIONS_DEFAULT:
             raise InvalidScanRegions(regions)
-        # Classify from cached maps only. TURBOSCAN_REGIONS probe-reads 64 KiB
-        # from every readable region (CUSA13762 has ~370) including uncached
-        # GPU — that is a hitch, not a scan, and is why First Scan looked hung.
-        classified = classify_maps(self.maps(pid))
+        # Cheap TURBOSCAN_REGIONS (probe_bytes=1) returns leaf-PTE PCD so we
+        # can skip uncached GPU. probe_bytes=0 is 64 KiB × every readable map
+        # and hangs. If the probe fails, fall back to maps() rw- (no PCD bit).
+        probed = self._transport.scan_regions(pid, probe_bytes=SCAN_REGIONS_PROBE_BYTES)
+        if probed is not None:
+            classified = classify_turbo_regions(probed)
+            source = "pcd"
+        else:
+            classified = classify_maps(self.maps(pid))
+            source = "maps-fallback"
         merged_segs = ranges_to_segments(classified)
         if not merged_segs:
             raise ScanUnsupported("no writable cached regions to scan")
         total = sum(length for _addr, length in merged_segs)
         _LOG.info(
-            "first scan: %s rw- segments, %.1f MiB (no region-probe)",
+            "first scan: %s rw- segments, %.1f MiB (%s)",
             len(merged_segs),
             total / (1024 * 1024),
+            source,
         )
         return merged_segs
 
@@ -383,6 +392,36 @@ class Session:
                         elif unknown_explicit:
                             raise ScanUnsupported(
                                 "unknown snapshot declined; will not download RAM"
+                            )
+                        elif engines & TSE_SNAPSHOT:
+                            # Match-list cap is 256 MiB (~22M u32 hits). Common
+                            # values overflow it. Snapshot keeps a bitmap on the
+                            # console; exact COUNT then narrows without dumping.
+                            _LOG.info(
+                                "resident match-list declined; snapshot then exact count"
+                            )
+                            self._transport.scan_start_turbo(
+                                pid,
+                                segments,
+                                value_type=vt,
+                                compare_type=ct,
+                                alignment=align,
+                                value=parsed_value,
+                                unknown=True,
+                                engines=engines,
+                            )
+                            count = self._transport.scan_count_resident(
+                                value_type=vt,
+                                compare_type=SCAN_COMPARE_EXACT,
+                                value=parsed_value,
+                            )
+                            engine = "turbo"
+                            _LOG.info("snapshot exact count: %s", count)
+                        else:
+                            raise ScanUnsupported(
+                                "turbo resident declined and snapshot is unavailable; "
+                                "narrow the value or regions — will not stream all "
+                                "matches to the PC"
                             )
                     if engine != "turbo":
                         if unknown_explicit:
