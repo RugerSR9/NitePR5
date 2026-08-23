@@ -6,7 +6,9 @@ Homebrew memory editor for a jailbroken PS5 (firmware 9.60, etaHEN, PS5Debug). N
 
 ## Status
 
-Phase 3 is **code-complete** (mock tests pass): connect, scan, hex poke with confirm, watch, freeze, GoldHEN JSON. Hardware exits for Phase 2 (scan hunt) and Phase 3 (poke / freeze / cheat) are still outstanding — do not start Phase 4. Facts: [docs/HANDOFF.md](docs/HANDOFF.md).
+Phase 3 is **code-complete** (mock tests pass): connect, scan, hex poke with confirm, watch, freeze, GoldHEN JSON. Hardware exits for Phase 2 (scan hunt) and Phase 3 (poke / freeze / cheat) are still outstanding — do not start Phase 4.
+
+**Agents / next session:** start at [docs/HANDOFF.md](docs/HANDOFF.md) (“Next orchestrator — start here”). After a failed scan that timed out on 4/8 bytes, Disconnect+Connect (or restart uvicorn) before scanning again; the rest-mode hint can be a false alarm.
 
 ## Phase 0 — how to run
 

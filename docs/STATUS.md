@@ -6,10 +6,10 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 product: NitePR5
 active_phase: 3
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 # Phase 3 code-complete: mock pytest 81 passed. Hardware poke/freeze/cheat not run.
-# Phase 2 still code_complete. Exact overflow: segmented START + skip doomed snapshot.
-# Do not start Phase 4. Read docs/HANDOFF.md.
+# Phase 2 still code_complete. Exact overflow fix in tree, not re-tested live.
+# Do not start Phase 4. Next agent: docs/HANDOFF.md “Next orchestrator — start here”.
 ```
 
 | Phase | State | Notes |
@@ -56,4 +56,5 @@ last_updated: 2026-08-21
 | 2026-08-21 | orchestrator | Phase 3 started (user override; Phase 2 stays code_complete). Spawn core write/watch/freeze/cheat first. |
 | 2026-08-21 | orchestrator | Phase 3 core: write/watch/freeze/cheat in nitepr5-core; pytest 68. Spawn UI + HTTP + cap tests. |
 | 2026-08-21 | orchestrator | Phase 3 HTTP + tests + UI merged. Caps refuse 257/65/33. pytest 80. `code_complete`. |
-| 2026-08-21 | orchestrator | Live scan: exact overflow used 1-range dump drain + doomed snapshot (`snapshot_ok=0`), then 4-byte timeout (desync). Always segmented START; skip snapshot if bitmap > 448 MiB. |
+| 2026-08-21 | orchestrator | Live scan: exact overflow used 1-range dump drain + doomed snapshot (`snapshot_ok=0`), then 4-byte timeout (desync). Always segmented START; skip snapshot if bitmap > 448 MiB. pytest 81. |
+| 2026-08-23 | orchestrator | Context full. Compressed pickup into `docs/HANDOFF.md` (next orchestrator). No Phase 4. Hardware still needs reconnect + less-common First Scan. |

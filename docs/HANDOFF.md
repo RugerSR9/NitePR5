@@ -6,41 +6,63 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ---
 
-## Next orchestrator — start here (hardware exits; **not** Phase 4)
+## Next orchestrator — start here (2026-08-23)
 
-Phases **0 and 1 are `done`**. Phases **2 and 3 are `code_complete`** (mock **80 passed**). Do **not** re-do 0–3. Do **not** mark 2 or 3 `done` from mocks. Do **not** create `plugin/` or start Phase 4 until Phase 3’s hardware exit passes or the user overrides.
+**Do not start Phase 4.** Do not create `plugin/` or `overlay/`. Do not re-implement Phases 0–3.
 
-**Preferred next step:** restart uvicorn, hard-refresh the browser, run the Phase 3 hardware exit on **CUSA13762** (poke → freeze → save JSON → reload + toggle). Phase 2 hunt can share that session if a changing integer is handy.
+| Fact | Value |
+|---|---|
+| Phases 0–1 | `done` |
+| Phases 2–3 | `code_complete` (hardware exits **not** run) |
+| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **81 passed** (2026-08-21 after overflow/desync fix) |
+| Last user work | Live First Scan on CUSA13762 failed; then asked to compress this handoff (context full) |
+| Git | Phase 1 on `main` (PR #1). Phase 2–3 + scan fix may be **uncommitted**. **Commit only if the user asks.** |
 
-### Git
+### Last live incident (must re-test after reconnect)
 
-Phase 1 is on `main` (PR #1). Phase 2–3 may still be **uncommitted** — **commit only if the user asks.** Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`.
+User First Scan (exact, common value) then:
 
-### Read in this order
+1. `server declined unknown snapshot (snapshot_ok=0)`
+2. Next command: `timed out reading 4 bytes from 192.168.4.42:744` + rest-mode hint
 
-1. `AGENTS.md`
-2. `docs/STATUS.md`
-3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
-4. `docs/ORCHESTRATION.md` Phase 4 playbook (only after Phase 3 `done` or user override)
-5. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
+**Cause (fixed in tree, not re-verified on hardware):** exact first scan overflowed the 256 MiB resident match list. Old path used **single-range** resident START, which streams the full hit list on overflow; draining that as a u64 stream **desynced :744**. Then the client retried a **full-region snapshot**, which the console declined (`snapshot_ok=0` = ENOSPC / bitmap > 448 MiB / `/data` full). The 4-byte timeout is leftover protocol, **not** rest mode.
 
-### Hardware (CUSA13762)
+**Fix in tree:**
 
-Keep **CUSA13762** (The Golf Club 2019) in the foreground. Restart uvicorn so this tree is loaded. Hard-refresh so `app.js` is not cached. Connect `http://127.0.0.1:1744` → attach `eboot.bin`.
+- Always **segmented** resident START (even for one range). Segmented overflow = empty sentinel, not a dump.
+- Drain overflow with `drain_result_blocks` (u64 length + payload until sentinel), never `_recv_u64_stream`.
+- Snapshot+exact COUNT retry **only if** `snapshot_fits()` (bitmap ≤ `SNAP_BITMAP_MAX` = 448 MiB). Else `ScanUnsupported(TOO_MANY_MATCHES)` — tell the user to First Scan a less common in-game value.
+- `classify_maps` fallback skips `SceGnm` by name (no PCD bit without TURBOSCAN_REGIONS).
+- ConnectionLost copy now says reconnect / desync; rest mode is secondary.
+
+Helpers: `web/nitepr5_core/scan.py` — `snapshot_fits`, `snapshot_bitmap_bytes`, `drain_result_blocks`, `TOO_MANY_MATCHES`. Tests: `test_snapshot_fits_bitmap_cap`, maps-fallback GPU excluded (`count == 3`).
+
+### What the next agent should do
+
+1. Restart uvicorn + hard-refresh the browser (`app.js` cache).
+2. User: **Disconnect then Connect** (or restart uvicorn). The old :744 session is likely desynced.
+3. Re-run First Scan on **CUSA13762** with a **less common changing integer** (not 0/1). Unknown-initial on the whole writable set can still decline if the snapshot is huge.
+4. If that hunt works, continue Phase 2 exit (Next Scan a few times) and Phase 3 exit (poke confirm → freeze → save GoldHEN JSON in `web/cheats/` → reload + toggle).
+5. Only then mark Phase 2/3 `done`. Still no Phase 4 unless the user overrides.
 
 ```powershell
 python -m pytest web/tests web/nitepr5_core/tests -q
 python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
 ```
 
-| Exit | Steps |
-|---|---|
-| Phase 2 | First Scan a known changing integer → change in-game → Next Scan a few times |
-| Phase 3 | Poke a value from hex (confirm dialog) → Freeze it → Save GoldHEN JSON → Load that file → toggle the mod |
+UI: `http://127.0.0.1:1744` → attach `eboot.bin`. Host `192.168.4.42`. ps5debug-NG v1.3.0 via elfldr **9021** (not Toolbox PS5Debug). Rest mode **does** drop 744 after sleep; that is separate from the 4-byte desync.
 
-**Do not confuse hex/watch poll with a hung scan.** After attach, uvicorn will spam `GET /api/read?…` at 4 Hz and `GET /api/watch/poll` at 10 Hz. `POST /api/scan/start` is logged only when it **finishes**. During a hunt: hex status `paused (scan)`; watch/freeze timers must stop. Freeze tick is `POST /api/freeze/tick` ~15 Hz only while the freeze list is non-empty.
+**Hex/watch poll ≠ hung scan.** After attach, uvicorn spams `GET /api/read` ~4 Hz and `GET /api/watch/poll` ~10 Hz. `POST /api/scan/start` logs only when it **finishes**. During a hunt: `paused (scan)`; watch/freeze timers must stop.
 
-Host `192.168.4.42`. ps5debug-NG v1.3.0 (elfldr 9021). Rest mode drops 744. `eboot.bin` pid **changes every launch**.
+Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`.
+
+### Read in this order
+
+1. `AGENTS.md`
+2. `docs/STATUS.md`
+3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
+4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — **only** after Phase 3 `done` or user override
 
 Forbidden until Phase 4/5: overlay, plugin, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`.
 
@@ -246,7 +268,7 @@ Errors: `ResultsTooMany`, `InvalidResultLimit`, `ScanActive` (`ScanInFlight` ali
 
 **Replace vs ScanActive:** a new `scan_start` **ends the previous idle hunt** (like `connect()`). `ScanActive` if `_busy` (op in flight), if peephole `read()` cannot take `_io` (another thread holds :744), or `attach_target` to a **different** pid during a hunt.
 
-**Still not implemented:** `write`, `watch_*`, `freeze_*`, `cheat_*`.
+**Phase 2 did not implement** `write` / `watch_*` / `freeze_*` / `cheat_*` — **Phase 3 added them.** Do not re-add.
 
 Compare names: `exact` / `equal`, `increased`, `decreased`, `changed`, `unchanged`. Unknown first scan: `unknown=True` or `compare="unknown"` — never the default.
 
@@ -361,7 +383,7 @@ Also touched: `session.py`, `transport.py`, `constants.py` (`SCAN_IO_TIMEOUT`, `
 
 **Exit (ARCHITECTURE, not yet):** change a value in-game from hex; freeze it; save a cheat; reload the file and toggle it. Do not mark `done` from mocks.
 
-`python -m pytest web/tests web/nitepr5_core/tests -q` → **80 passed**.
+`python -m pytest web/tests web/nitepr5_core/tests -q` → **81 passed** (includes overflow/desync tests).
 
 ### What shipped
 
