@@ -4,11 +4,12 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 
 ```yaml
 product: NitePR5
-active_phase: 2
+active_phase: 3
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
-last_updated: 2026-08-21
-# Phase 2 code-complete: mock pytest 54 passed (overflow → snapshot+exact). Hardware exit not run.
-# Next session: restart uvicorn, run the hardware exit, or start Phase 3 if the user overrides. Read docs/HANDOFF.md.
+last_updated: 2026-08-24
+# Phase 3 code-complete: mock pytest 98 passed. Hardware poke/freeze/cheat not re-run.
+# PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
+# Restart uvicorn + Disconnect/Connect after this tree. Phase 2 still code_complete. No Phase 4.
 ```
 
 | Phase | State | Notes |
@@ -16,15 +17,16 @@ last_updated: 2026-08-21
 | 0 Environment | done | ps5debug-NG 1.3.0 on FW 9.60; procs + foreground from this PC |
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
 | 2 Scan loop | code_complete | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. Hardware hunt not run. |
-| 3 Hex, watch, freeze, JSON | not_started | First shippable product |
+| 3 Hex, watch, freeze, JSON | code_complete | Poke + watch + freeze + GoldHEN JSON. Writes use two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware exit not run. |
 | 4 Plugin daemon | not_started | Do not create `plugin/` early |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Hardware exit test still needs CUSA13762 in the foreground with a changing integer (score/timer). Do not mark Phase 2 `done` from mocks. Restart uvicorn so the current tree is loaded.
-- Two live failures already fixed in tree (see HANDOFF Phase 2 lessons): (1) 10s recv timeout on turbo progress `u64`; (2) `TURBOSCAN_REGIONS` 64 KiB-probes of all maps (now `probe_bytes=1` + skip PCD). Re-test both plus aliasing.
+- Phase 2 hardware hunt still needs CUSA13762 with a changing integer. Do not mark Phase 2 `done` from mocks.
+- Phase 3 hardware exit: poke from hex, freeze, save JSON, reload and toggle. Do not mark Phase 3 `done` from mocks. Restart uvicorn so this tree is loaded; hard-refresh the browser for `app.js`.
+- After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
 
 ## Session log
 
@@ -51,3 +53,10 @@ last_updated: 2026-08-21
 | 2026-08-21 | orchestrator | Expanded docs/HANDOFF.md with Phase 2 API, timeout/lock/hex-pause, probe hang, uvicorn log trap, live CUSA13762 lessons. |
 | 2026-08-21 | orchestrator | Scan speed on `phase_2-speedImprovements`: TS_USE_ALIASING + TS_RESCAN_ALIASING; TURBOSCAN_REGIONS probe_bytes=1 skip PCD; resident decline → ScanUnsupported. pytest 53. |
 | 2026-08-21 | orchestrator | Exact first-scan overflow: snapshot then exact COUNT instead of ScanUnsupported / iterative dump. |
+| 2026-08-21 | orchestrator | Phase 3 started (user override; Phase 2 stays code_complete). Spawn core write/watch/freeze/cheat first. |
+| 2026-08-21 | orchestrator | Phase 3 core: write/watch/freeze/cheat in nitepr5-core; pytest 68. Spawn UI + HTTP + cap tests. |
+| 2026-08-21 | orchestrator | Phase 3 HTTP + tests + UI merged. Caps refuse 257/65/33. pytest 80. `code_complete`. |
+| 2026-08-21 | orchestrator | Live scan: exact overflow used 1-range dump drain + doomed snapshot (`snapshot_ok=0`), then 4-byte timeout (desync). Always segmented START; skip snapshot if bitmap > 448 MiB. pytest 81. |
+| 2026-08-23 | orchestrator | Context full. Compressed pickup into `docs/HANDOFF.md` (next orchestrator). No Phase 4. Hardware still needs reconnect + less-common First Scan. |
+| 2026-08-24 | orchestrator | Live 400+409 + poke fail: 250 ms :744 wait timed out behind hung reads; ConnectionLost left the socket "connected". Drop on lost; wait for peers; UI stops polls on 409. pytest 96. |
+| 2026-08-24 | orchestrator | Hex poke still 409: `timed out reading 4 bytes` on `POST /api/write`. Cause: ps5dbg 0.1.1 packs PROC_WRITE payload into `datalen`; server ACKs then waits for a second payload. Two-phase `proc_write_phased` + UI pauses polls during poke. pytest 98. |

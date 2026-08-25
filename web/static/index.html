@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>NitePR5</h1>
-    <p class="tagline">PS5Debug peephole + scan · FW 9.60 · 127.0.0.1:1744</p>
+    <p class="tagline">PS5Debug peephole + scan + watch · FW 9.60 · 127.0.0.1:1744</p>
   </header>
 
   <section id="connect-panel">
@@ -94,6 +94,7 @@
           <tr>
             <th>Address</th>
             <th>Current (u32)</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="scan-body"></tbody>
@@ -108,6 +109,14 @@
       <button type="button" id="btn-pause" disabled>Pause</button>
       <span id="hex-status" class="muted" role="status"></span>
     </div>
+    <div class="hex-toolbar poke-toolbar">
+      <button type="button" id="btn-watch-hex" disabled>Watch selected</button>
+      <button type="button" id="btn-freeze-hex" disabled>Freeze 4 bytes</button>
+      <label for="hex-poke-u32">Poke u32</label>
+      <input id="hex-poke-u32" name="hex-poke-u32" type="text" placeholder="100 or 0x64" autocomplete="off" spellcheck="false">
+      <button type="button" id="btn-poke-u32" disabled>Poke u32</button>
+      <span id="hex-sel" class="muted mono"></span>
+    </div>
     <div class="table-wrap hex-wrap">
       <table class="hex">
         <thead>
@@ -120,6 +129,81 @@
         <tbody id="hex-body"></tbody>
       </table>
     </div>
+  </section>
+
+  <section id="watch-panel">
+    <h2>Watch</h2>
+    <p class="muted">Pinned addresses only (max 64, ~10 Hz). Live bytes — not a RAM dump.</p>
+    <div class="scan-controls">
+      <button type="button" id="btn-watch-add" disabled>Add watch</button>
+      <span id="watch-cap" class="muted">0/64</span>
+      <span id="watch-hint" class="muted"></span>
+    </div>
+    <p id="watch-status" class="status" role="status"></p>
+    <div class="table-wrap scan-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Address</th>
+            <th>n</th>
+            <th>Live (hex / u32)</th>
+            <th></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="watch-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="freeze-panel">
+    <h2>Freeze</h2>
+    <p class="muted">Max 32 addresses, 15 Hz bulk write. The UI owns the timer — core does not tick by itself.</p>
+    <div class="scan-controls">
+      <span id="freeze-cap" class="muted">0/32</span>
+      <span id="freeze-hint" class="muted"></span>
+    </div>
+    <p id="freeze-status" class="status" role="status"></p>
+    <div class="table-wrap scan-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Address</th>
+            <th>Data (hex)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="freeze-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="cheat-panel">
+    <h2>Cheats</h2>
+    <p class="muted">GoldHEN JSON on this PC (<span class="mono">web/cheats/</span>). Never writes <span class="mono">/data/etaHEN/cheats/</span>.</p>
+    <div class="scan-controls">
+      <label for="cheat-file">File</label>
+      <select id="cheat-file">
+        <option value="">—</option>
+      </select>
+      <button type="button" id="btn-cheat-load" disabled>Load</button>
+      <button type="button" id="btn-cheat-save" disabled>Save</button>
+      <button type="button" id="btn-cheat-save-freezes" disabled>Save freezes as cheat</button>
+    </div>
+    <div class="scan-controls">
+      <label for="cheat-filename">Save as</label>
+      <input id="cheat-filename" name="cheat-filename" type="text" placeholder="CUSA00000_01.00.json" autocomplete="off" spellcheck="false">
+      <label for="cheat-id">id</label>
+      <input id="cheat-id" name="cheat-id" type="text" placeholder="CUSA00000" autocomplete="off" spellcheck="false">
+      <label for="cheat-version">version</label>
+      <input id="cheat-version" name="cheat-version" type="text" placeholder="01.00" autocomplete="off" spellcheck="false">
+      <label for="cheat-game-name">name</label>
+      <input id="cheat-game-name" name="cheat-game-name" type="text" placeholder="Game Title" autocomplete="off" spellcheck="false">
+    </div>
+    <p id="cheat-status" class="status" role="status"></p>
+    <div id="cheat-mods" class="cheat-mods"></div>
   </section>
 
   <script src="/static/app.js"></script>

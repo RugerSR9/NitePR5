@@ -1,4 +1,4 @@
-"""NitePR5 session core — connect, target, maps, peephole read, turbo scan.
+"""NitePR5 session core — connect, target, maps, peephole R/W, turbo scan, watch, freeze, cheats.
 
 Put ``web/`` on ``sys.path``::
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .constants import (
     CONNECT_TIMEOUT,
+    FREEZE_MAX,
     HEX_PEEPHOLE_DEFAULT,
     PS5DEBUG_PORT,
     READ_MAX,
@@ -16,17 +17,30 @@ from .constants import (
     SCAN_ALIGN_U32,
     SCAN_IO_TIMEOUT,
     SCAN_REGIONS_DEFAULT,
+    WATCH_MAX,
+    WATCH_SIZE_DEFAULT,
+    WATCH_SIZES,
+    WRITE_MAX,
 )
 from .errors import (
     ConnectFailed,
+    FreezeLimit,
+    InvalidCheat,
+    InvalidFreezeSize,
     InvalidReadSize,
     InvalidResultLimit,
     InvalidScanCompare,
     InvalidScanRegions,
     InvalidScanValue,
+    InvalidWatchSize,
+    InvalidWriteSize,
     NitePR5Error,
+    NoCheat,
+    NoFreeze,
+    NoMod,
     NoScan,
     NoTarget,
+    NoWatch,
     NotConnected,
     ReadTooLarge,
     ResultsTooMany,
@@ -34,14 +48,28 @@ from .errors import (
     ScanInFlight,
     ScanUnsupported,
     UndoTooLarge,
+    WatchLimit,
+    WriteTooLarge,
 )
 from .host import discover, resolve_host
 from .session import Session
 from .transport import MockTransport, Ps5dbgTransport
-from .types import ForegroundInfo, MemoryMap, ProcessInfo, ScanHit
+from .types import (
+    CheatFile,
+    CheatMod,
+    CheatPatch,
+    FreezeEntry,
+    ForegroundInfo,
+    MemoryMap,
+    ProcessInfo,
+    ScanHit,
+    WatchEntry,
+    WatchValue,
+)
 
 __all__ = [
     "CONNECT_TIMEOUT",
+    "FREEZE_MAX",
     "HEX_PEEPHOLE_DEFAULT",
     "PS5DEBUG_PORT",
     "READ_MAX",
@@ -49,15 +77,32 @@ __all__ = [
     "SCAN_ALIGN_U32",
     "SCAN_IO_TIMEOUT",
     "SCAN_REGIONS_DEFAULT",
+    "WATCH_MAX",
+    "WATCH_SIZE_DEFAULT",
+    "WATCH_SIZES",
+    "WRITE_MAX",
+    "CheatFile",
+    "CheatMod",
+    "CheatPatch",
     "ConnectFailed",
+    "FreezeEntry",
+    "FreezeLimit",
+    "InvalidCheat",
+    "InvalidFreezeSize",
     "InvalidReadSize",
     "InvalidResultLimit",
     "InvalidScanCompare",
     "InvalidScanRegions",
     "InvalidScanValue",
+    "InvalidWatchSize",
+    "InvalidWriteSize",
     "NitePR5Error",
+    "NoCheat",
+    "NoFreeze",
+    "NoMod",
     "NoScan",
     "NoTarget",
+    "NoWatch",
     "NotConnected",
     "ReadTooLarge",
     "ResultsTooMany",
@@ -66,6 +111,10 @@ __all__ = [
     "ScanInFlight",
     "ScanUnsupported",
     "UndoTooLarge",
+    "WatchEntry",
+    "WatchLimit",
+    "WatchValue",
+    "WriteTooLarge",
     "discover",
     "resolve_host",
     "Session",

@@ -29,9 +29,12 @@ from nitepr5_core import (  # noqa: E402
 from nitepr5_core.scan import (  # noqa: E402
     classify_maps,
     classify_turbo_regions,
+    snapshot_bitmap_bytes,
+    snapshot_fits,
     turbo_start_flags,
     u32_from_bytes,
 )
+from nitepr5_core.constants import SNAP_BITMAP_MAX  # noqa: E402
 from nitepr5_core.types import MemoryMap, ScanRegion  # noqa: E402
 from nitepr5_core.transport import Ps5dbgTransport  # noqa: E402
 
@@ -226,6 +229,7 @@ def test_classify_maps_skips_executable() -> None:
         MemoryMap(name="rx", start=0, end=0x1000, offset=0, prot=5),
         MemoryMap(name="rw", start=0x1000, end=0x2000, offset=0, prot=3),
         MemoryMap(name="rwx", start=0x2000, end=0x3000, offset=0, prot=7),
+        MemoryMap(name="SceGnm", start=0x3000, end=0x4000, offset=0, prot=3),
     ]
     assert classify_maps(maps) == [(0x1000, 0x2000)]
 
@@ -238,6 +242,15 @@ def test_classify_turbo_regions_skips_uncached_and_exec() -> None:
         ScanRegion(start=0x3000, end=0x4000, prot=7, uncached=False),
     ]
     assert classify_turbo_regions(regions) == [(0x1000, 0x2000)]
+
+
+def test_snapshot_fits_bitmap_cap() -> None:
+    small = [(0, 4096)]
+    assert snapshot_fits(small)
+    # 448 MiB bitmap ≈ 14.3 GiB of u32-aligned slots — one oversized segment.
+    huge = [(0, 16 * 1024 * 1024 * 1024)]
+    assert snapshot_bitmap_bytes(huge) > SNAP_BITMAP_MAX
+    assert not snapshot_fits(huge)
 
 
 def test_turbo_start_flags_aliasing_not_parallel() -> None:
@@ -294,9 +307,9 @@ def test_region_probe_failure_falls_back_to_maps(
     session, transport = connected
     transport.fail_regions_probe = True
     count = session.scan_start(value=100)
-    assert count == 4
+    assert count == 3
     addrs = {h.addr for h in session.scan_results(256)}
-    assert MockTransport.GPU_ADDR in addrs
+    assert MockTransport.GPU_ADDR not in addrs
     assert transport.regions_probe_count == 1
 
 
@@ -356,30 +369,15 @@ def test_scan_wait_drops_recv_timeout_then_restores() -> None:
     assert sock.gettimeout() == CONNECT_TIMEOUT
 
 
-def test_read_fails_fast_when_console_io_held(
+def test_read_fails_fast_when_scan_busy(
     connected: tuple[Session, MockTransport],
 ) -> None:
-    import threading
-
     session, _transport = connected
-    barrier = threading.Barrier(2)
-
-    def holder() -> None:
-        session._io.acquire()
-        try:
-            barrier.wait()
-            barrier.wait()
-        finally:
-            session._io.release()
-
-    thread = threading.Thread(target=holder)
-    thread.start()
-    barrier.wait()
+    session._begin_busy()
     try:
         with pytest.raises(ScanActive):
             session.read(MockTransport.EBOOT_PID, MockTransport.RAM_BASE, 16)
     finally:
-        barrier.wait()
-        thread.join()
+        session._end_busy()
     peephole = session.read(MockTransport.EBOOT_PID, MockTransport.RAM_BASE, 16)
     assert len(peephole) == 16

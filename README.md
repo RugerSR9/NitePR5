@@ -6,7 +6,9 @@ Homebrew memory editor for a jailbroken PS5 (firmware 9.60, etaHEN, PS5Debug). N
 
 ## Status
 
-Phase 1 is **done**: web UI on localhost 1744; live 512-byte peephole on `CUSA13762`. Next orchestrator: Phase 2 — start at [docs/HANDOFF.md](docs/HANDOFF.md) (“Next orchestrator”).
+Phase 3 is **code-complete** (mock tests pass): connect, scan, hex poke with confirm, watch, freeze, GoldHEN JSON. Hardware exits for Phase 2 (scan hunt) and Phase 3 (poke / freeze / cheat) are still outstanding — do not start Phase 4.
+
+**Agents / next session:** start at [docs/HANDOFF.md](docs/HANDOFF.md) (“Next orchestrator — start here”). After a failed scan that timed out on 4/8 bytes, Disconnect+Connect (or restart uvicorn) before scanning again; the rest-mode hint can be a false alarm.
 
 ## Phase 0 — how to run
 
@@ -51,7 +53,9 @@ $env:NITEPR5_MOCK = "1"
 python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
 ```
 
-Exit test: open a PS4-on-PS5 title (`CUSA*`), Connect, attach `eboot.bin`, confirm live bytes. `python -m pytest web/tests -q` covers the mock path.
+Exit test (Phase 1, done): open a PS4-on-PS5 title (`CUSA*`), Connect, attach `eboot.bin`, confirm live bytes.
+
+Phase 3 adds poke (confirm), watch ≤64 @ ~10 Hz, freeze ≤32 @ 15 Hz, and GoldHEN files in `web/cheats/`. Writes never go to `/data/etaHEN/cheats/`. `python -m pytest web/tests web/nitepr5_core/tests -q` covers the mock path.
 
 ## Phases (short)
 

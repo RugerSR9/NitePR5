@@ -1,7 +1,6 @@
-"""NitePR5 session — connect, maps, peephole read, turbo scan loop.
+"""NitePR5 session — connect, maps, peephole R/W, turbo scan, watch, freeze, cheats.
 
 ``attach_target`` is logical (stores the pid). It does not debugger-attach.
-write / freeze / cheats are not implemented in this phase.
 
 Scan policy (ARCHITECTURE §5.3):
 - One scan per Session / one ``:744`` connection. A new ``scan_start`` ends
@@ -13,19 +12,36 @@ Scan policy (ARCHITECTURE §5.3):
 - Unknown first scan requires ``unknown=True`` or ``compare='unknown'``.
 - ``scan_results`` refuses limit > 256 or <= 0. If count > 256, returns [] and
   does not GET (count-first UI).
+
+Watch / freeze / write take ``_hold_io(block=False)`` so they fail fast with
+``ScanActive`` while a hunt (``_busy``) owns the socket. They wait for a
+short hex/watch/freeze peer — not 400 on every overlapping tick. No second
+``:744`` connection. UI owns 10 Hz / 15 Hz timers; this layer has no
+background threads.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from collections.abc import Iterator
+from pathlib import Path
 
+from .cheat import (
+    cheat_file_from_freezes,
+    load_cheat_file,
+    module_base_from_maps,
+    save_cheat_file,
+)
 from .constants import (
     CONNECT_TIMEOUT,
     EBOOT_NAME,
+    EXECUTABLE_MAP_NAME,
+    FREEZE_MAX,
+    FREEZE_SIZE_MAX,
+    FREEZE_SIZE_MIN,
     PS5DEBUG_PORT,
     READ_MAX,
     RESULTS_MAX,
@@ -36,23 +52,39 @@ from .constants import (
     SCAN_REGIONS_PROBE_BYTES,
     TSE_SERVER_RESIDENT,
     TSE_SNAPSHOT,
+    WATCH_MAX,
+    WATCH_SIZE_DEFAULT,
+    WATCH_SIZES,
+    WRITE_MAX,
 )
 from .errors import (
     ConnectFailed,
+    FreezeLimit,
+    InvalidCheat,
+    InvalidFreezeSize,
     InvalidReadSize,
     InvalidResultLimit,
     InvalidScanRegions,
+    InvalidWatchSize,
+    InvalidWriteSize,
     NitePR5Error,
+    NoCheat,
+    NoFreeze,
+    NoMod,
     NoScan,
     NoTarget,
+    NoWatch,
     NotConnected,
     ReadTooLarge,
     ResultsTooMany,
     ScanActive,
     ScanUnsupported,
     UndoTooLarge,
+    WatchLimit,
+    WriteTooLarge,
 )
 from .scan import (
+    TOO_MANY_MATCHES,
     alignment_or_default,
     cap_get_count,
     classify_maps,
@@ -65,11 +97,21 @@ from .scan import (
     ranges_to_segments,
     require_first_compare,
     require_next_compare,
+    snapshot_fits,
     u32_from_bytes,
     value_size,
 )
 from .transport import Ps5dbgTransport, Transport
-from .types import ForegroundInfo, MemoryMap, ProcessInfo, ScanHit
+from .types import (
+    CheatFile,
+    FreezeEntry,
+    ForegroundInfo,
+    MemoryMap,
+    ProcessInfo,
+    ScanHit,
+    WatchEntry,
+    WatchValue,
+)
 
 _LOG = logging.getLogger("nitepr5")
 
@@ -102,6 +144,15 @@ class Session:
         self._scan: _ScanState | None = None
         self._busy = False
         self._io = threading.RLock()
+        self._busy_gate = threading.Lock()
+        self._io_owner: int | None = None
+        self._io_depth = 0
+        self._watches: dict[int, WatchEntry] = {}
+        self._freezes: dict[int, FreezeEntry] = {}
+        self._next_watch_id = 1
+        self._next_freeze_id = 1
+        self._cheat: CheatFile | None = None
+        self._cheat_enabled: set[str] = set()
 
     def __enter__(self) -> Session:
         return self
@@ -135,22 +186,39 @@ class Session:
         return self._target_pid
 
     def _begin_busy(self) -> None:
-        if self._busy:
-            raise ScanActive("scan operation already in flight")
-        self._busy = True
+        with self._busy_gate:
+            if self._busy:
+                raise ScanActive("scan operation already in flight")
+            self._busy = True
 
     def _end_busy(self) -> None:
-        self._busy = False
+        with self._busy_gate:
+            self._busy = False
 
     @contextmanager
     def _hold_io(self, *, block: bool = True) -> Iterator[None]:
-        """Serialize all TCP 744 use. Peephole reads fail fast during a scan."""
-        got = self._io.acquire(blocking=block)
-        if not got:
+        """Serialize all TCP 744 use.
+
+        ``block=False`` fails fast only when another thread's scan owns the
+        socket (``_busy``). The scan thread may re-enter (maps fallback).
+        Hex / watch / freeze / poke wait for each other — a short timeout here
+        turned live pokes into 400s whenever a peephole read was in flight.
+        """
+        me = threading.get_ident()
+        already = self._io_owner == me
+        if not block and self._busy and not already:
             raise ScanActive("scan in flight; peephole paused")
+        self._io.acquire(blocking=True)
+        self._io_owner = me
+        self._io_depth += 1
         try:
+            if not block and self._busy and not already:
+                raise ScanActive("scan in flight; peephole paused")
             yield
         finally:
+            self._io_depth -= 1
+            if self._io_depth == 0:
+                self._io_owner = None
             self._io.release()
 
     def discover(self, *, timeout: float = 2.0) -> list[str]:
@@ -174,6 +242,7 @@ class Session:
             self._host = None
             self._target_pid = None
             self._maps_cache.clear()
+            self._clear_watches_and_freezes()
 
     def processes(self) -> list[ProcessInfo]:
         """pid, name, and titleid when cheap (foreground pid or eboot.bin proc_info)."""
@@ -220,6 +289,7 @@ class Session:
             )
         if self._target_pid is not None and pid != self._target_pid:
             self._maps_cache.clear()
+            self._clear_watches_and_freezes()
         self._target_pid = pid
 
     def maps(
@@ -253,6 +323,202 @@ class Session:
             raise NitePR5Error(f"addr must be int, got {addr!r}")
         with self._hold_io(block=False):
             return self._transport.read(pid, address=addr, length=n)
+
+    def write(self, pid: int | None, addr: int, data: bytes) -> None:
+        """Peephole poke. Default pid is the attached target. Rejects empty / >4 KiB.
+
+        Confirm dialogs are a UI concern. Fail-fast if a hunt owns :744;
+        otherwise wait for a short hex/watch/freeze peer so a poke is not
+        refused as ScanActive.
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            raise InvalidWriteSize(data)
+        n = len(data)
+        if n == 0:
+            raise InvalidWriteSize(n)
+        if n > WRITE_MAX:
+            raise WriteTooLarge(n)
+        self._require_connected()
+        pid = self._resolve_pid(pid)
+        if not isinstance(addr, int) or isinstance(addr, bool):
+            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        with self._hold_io(block=False):
+            self._transport.write(pid, address=addr, data=bytes(data))
+
+    def _clear_watches_and_freezes(self) -> None:
+        self._watches.clear()
+        self._freezes.clear()
+        self._next_watch_id = 1
+        self._next_freeze_id = 1
+
+    def watches(self) -> list[WatchEntry]:
+        """Pinned watches (metadata). Live bytes come from watch_poll()."""
+        return list(self._watches.values())
+
+    def freezes(self) -> list[FreezeEntry]:
+        """Pinned freeze patches. Writes happen only in freeze_tick()."""
+        return list(self._freezes.values())
+
+    def loaded_cheat(self) -> CheatFile | None:
+        """Currently loaded GoldHEN file, or None. Enabled flags are in-memory."""
+        return self._cheat
+
+    def cheat_enabled_names(self) -> list[str]:
+        return sorted(self._cheat_enabled)
+
+    def watch_add(
+        self,
+        pid: int | None = None,
+        *,
+        addr: int,
+        n: int = WATCH_SIZE_DEFAULT,
+        label: str = "",
+    ) -> WatchEntry:
+        """Pin an address. Cap 64; the 65th raises ``WatchLimit`` (fail closed)."""
+        if not isinstance(n, int) or isinstance(n, bool) or n not in WATCH_SIZES:
+            raise InvalidWatchSize(n)
+        if not isinstance(addr, int) or isinstance(addr, bool):
+            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        self._require_connected()
+        pid = self._resolve_pid(pid)
+        if len(self._watches) >= WATCH_MAX:
+            raise WatchLimit()
+        watch_id = self._next_watch_id
+        self._next_watch_id += 1
+        entry = WatchEntry(
+            id=watch_id,
+            pid=pid,
+            addr=addr,
+            n=n,
+            label=str(label),
+        )
+        self._watches[watch_id] = entry
+        return entry
+
+    def watch_remove(self, watch_id: int) -> None:
+        if watch_id not in self._watches:
+            raise NoWatch(watch_id)
+        del self._watches[watch_id]
+
+    def watch_poll(self) -> list[WatchValue]:
+        """Read each watch once. Empty list is a no-op. No thread / no 10 Hz."""
+        if not self._watches:
+            return []
+        self._require_connected()
+        out: list[WatchValue] = []
+        with self._hold_io(block=False):
+            for entry in self._watches.values():
+                data = self._transport.read(entry.pid, address=entry.addr, length=entry.n)
+                out.append(WatchValue(id=entry.id, addr=entry.addr, data=data))
+        return out
+
+    def freeze_add(
+        self,
+        pid: int | None = None,
+        *,
+        addr: int,
+        data: bytes,
+    ) -> FreezeEntry:
+        """Pin a patch. Cap 32; the 33rd raises ``FreezeLimit``. Data length 1..8."""
+        if not isinstance(data, (bytes, bytearray)):
+            raise InvalidFreezeSize(data)
+        n = len(data)
+        if n < FREEZE_SIZE_MIN or n > FREEZE_SIZE_MAX:
+            raise InvalidFreezeSize(n)
+        if not isinstance(addr, int) or isinstance(addr, bool):
+            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        self._require_connected()
+        pid = self._resolve_pid(pid)
+        if len(self._freezes) >= FREEZE_MAX:
+            raise FreezeLimit()
+        freeze_id = self._next_freeze_id
+        self._next_freeze_id += 1
+        entry = FreezeEntry(id=freeze_id, pid=pid, addr=addr, data=bytes(data))
+        self._freezes[freeze_id] = entry
+        return entry
+
+    def freeze_remove(self, freeze_id: int) -> None:
+        if freeze_id not in self._freezes:
+            raise NoFreeze(freeze_id)
+        del self._freezes[freeze_id]
+
+    def freeze_tick(self) -> int:
+        """Write each frozen patch once. Returns how many writes. No 15 Hz loop."""
+        if not self._freezes:
+            return 0
+        self._require_connected()
+        written = 0
+        with self._hold_io(block=False):
+            for entry in self._freezes.values():
+                self._transport.write(entry.pid, address=entry.addr, data=entry.data)
+                written += 1
+        return written
+
+    def _module_base(self, pid: int, process: str) -> int:
+        rows = self.maps(pid)
+        base = module_base_from_maps(rows, process)
+        if base is None:
+            raise InvalidCheat(
+                f"no maps named {process!r} (or {EXECUTABLE_MAP_NAME!r}) for pid {pid}"
+            )
+        return base
+
+    def cheat_from_freezes(
+        self,
+        *,
+        name: str,
+        title_id: str,
+        version: str,
+        process: str = EBOOT_NAME,
+    ) -> CheatFile:
+        """Build a GoldHEN file from the freeze list (module-relative offsets)."""
+        self._require_connected()
+        pid = self._resolve_pid(None)
+        proc = (process or EBOOT_NAME).strip() or EBOOT_NAME
+        base = self._module_base(pid, proc)
+        return cheat_file_from_freezes(
+            list(self._freezes.values()),
+            base=base,
+            name=name,
+            title_id=title_id,
+            version=version,
+            process=proc,
+        )
+
+    def cheat_load(self, path: str | Path) -> CheatFile:
+        cheat = load_cheat_file(path)
+        self._cheat = cheat
+        self._cheat_enabled.clear()
+        return cheat
+
+    def cheat_save(self, path: str | Path, cheat: CheatFile | None = None) -> None:
+        chosen = cheat if cheat is not None else self._cheat
+        if chosen is None:
+            raise NoCheat("no cheat file loaded")
+        save_cheat_file(path, chosen)
+        if cheat is not None:
+            self._cheat = chosen
+            self._cheat_enabled.clear()
+
+    def cheat_toggle(self, name: str, enabled: bool) -> None:
+        """Write GoldHEN on/off bytes at module_base + offset. Uses ``write()``."""
+        if self._cheat is None:
+            raise NoCheat("no cheat file loaded")
+        mod = next((m for m in self._cheat.mods if m.name == name), None)
+        if mod is None:
+            raise NoMod(name)
+        self._require_connected()
+        pid = self._resolve_pid(None)
+        process = self._cheat.process or EBOOT_NAME
+        base = self._module_base(pid, process)
+        for patch in mod.memory:
+            addr = base + int(patch.offset, 16)
+            payload = patch.on if enabled else patch.off
+            self.write(pid, addr, payload)
+        if enabled:
+            self._cheat_enabled.add(name)
+        else:
+            self._cheat_enabled.discard(name)
 
     def _end_scan(self, *, silent: bool = False) -> None:
         scan, self._scan = self._scan, None
@@ -359,10 +625,12 @@ class Session:
             ct = parse_compare(compare)
             require_first_compare(ct)
             parsed_value = parse_u32_value(value, required=True)
-        with self._hold_io():
-            self._end_scan(silent=True)
-            self._begin_busy()
-            try:
+        # Set _busy before taking :744 so hex/watch/freeze fail fast instead of
+        # waiting behind a hunt that can run for minutes.
+        self._begin_busy()
+        try:
+            with self._hold_io():
+                self._end_scan(silent=True)
                 with self._transport.scan_wait():
                     caps = self._transport.scan_caps()
                     self._transport.scan_authenticate()
@@ -393,7 +661,9 @@ class Session:
                             raise ScanUnsupported(
                                 "unknown snapshot declined; will not download RAM"
                             )
-                        elif engines & TSE_SNAPSHOT:
+                        elif engines & TSE_SNAPSHOT and snapshot_fits(
+                            segments, alignment=align
+                        ):
                             # Match-list cap is 256 MiB (~22M u32 hits). Common
                             # values overflow it. Snapshot keeps a bitmap on the
                             # console; exact COUNT then narrows without dumping.
@@ -418,11 +688,7 @@ class Session:
                             engine = "turbo"
                             _LOG.info("snapshot exact count: %s", count)
                         else:
-                            raise ScanUnsupported(
-                                "turbo resident declined and snapshot is unavailable; "
-                                "narrow the value or regions — will not stream all "
-                                "matches to the PC"
-                            )
+                            raise ScanUnsupported(TOO_MANY_MATCHES)
                     if engine != "turbo":
                         if unknown_explicit:
                             raise ScanUnsupported(
@@ -448,8 +714,8 @@ class Session:
                         iterative_all=iterative_all,
                     )
                     return count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_next(self, *, compare: str, value: int | None = None) -> int:
         """Narrow the active scan. Returns the new survivor count."""
@@ -459,9 +725,9 @@ class Session:
         ct = parse_compare(compare)
         require_next_compare(ct)
         parsed_value = parse_u32_value(value, required=(ct == SCAN_COMPARE_EXACT))
-        with self._hold_io():
-            self._begin_busy()
-            try:
+        self._begin_busy()
+        try:
+            with self._hold_io():
                 with self._transport.scan_wait():
                     self._stash_if_small()
                     self._scan.undo_stack.append((self._scan.count, self._scan.hits))
@@ -489,17 +755,17 @@ class Session:
                     self._scan.hits = None
                     self._scan.count = count
                     return count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_undo(self) -> int | None:
         """Undo one generation. None means the scan ended (first-scan undo)."""
         self._require_connected()
         if self._scan is None:
             raise NoScan("no active scan")
-        with self._hold_io():
-            self._begin_busy()
-            try:
+        self._begin_busy()
+        try:
+            with self._hold_io():
                 with self._transport.scan_wait():
                     if not self._scan.undo_stack:
                         self._end_scan(silent=False)
@@ -519,8 +785,8 @@ class Session:
                             pass
                         self._scan.engine = "local"
                     return prev_count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_count(self) -> int:
         """Current survivor count. Does not fetch rows."""
