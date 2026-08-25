@@ -4,14 +4,13 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 
 ```yaml
 product: NitePR5
-active_phase: 3
-phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
+active_phase: 4
+phase_state: not_started   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-25
-# Phase 3 code-complete: mock pytest. Hardware poke/freeze/cheat not re-run.
-# Web UI revamp (same session API): ImHex-style SPA chrome, hex canvas, drawers. Vanilla JS.
+# Phases 0–3 done on hardware (user 2026-08-25). Phase 4 plugin/ not created until this phase starts.
+# Web UI: ImHex-style SPA chrome, hex canvas, drawers. Vanilla JS. Session API unchanged.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
-# Restart uvicorn + Disconnect/Connect after this tree. Phase 2 still code_complete. No Phase 4.
-# LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills. No Phase 4.
+# LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
 # 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
 ```
 
@@ -19,16 +18,15 @@ last_updated: 2026-08-25
 |---|---|---|
 | 0 Environment | done | ps5debug-NG 1.3.0 on FW 9.60; procs + foreground from this PC |
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
-| 2 Scan loop | code_complete | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. Hardware hunt not run. |
-| 3 Hex, watch, freeze, JSON | code_complete | Poke + watch + freeze + GoldHEN JSON. Writes use two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware exit not run. |
-| 4 Plugin daemon | not_started | Do not create `plugin/` early |
+| 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
+| 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
+| 4 Plugin daemon | not_started | Do not create `plugin/` until this phase starts |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 2 hardware hunt still needs CUSA13762 with a changing integer. Do not mark Phase 2 `done` from mocks.
-- Phase 3 hardware exit: poke from hex, freeze, save JSON, reload and toggle. Do not mark Phase 3 `done` from mocks. Restart uvicorn so this tree is loaded; hard-refresh the browser for `app.js`.
+- None for Phases 0–3. Phase 4 has not started.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
 
 ## Session log
@@ -67,3 +65,4 @@ last_updated: 2026-08-25
 | 2026-08-25 | orchestrator | Installed LangSmith skills (`langsmith-trace`, dataset, evaluator). FastAPI tracing via `web/tracing.py`: Session spans + HTTP root traces; skip poll/hex; redact RAM. pytest 103. |
 | 2026-08-25 | orchestrator | Scan-hit jump sent `GET /api/read?addr=-389259952` (JS `addr & ~0xf` ToInt32). Align with modulo; `InvalidAddress` 400; parseGoto no `>>> 0`. pytest 106. |
 | 2026-08-25 | orchestrator | README rewritten as post-Phase 3 product docs (setup, editor loop, caps, cheats). No runtime change. |
+| 2026-08-25 | orchestrator | User confirmed Phase 2+3 hardware exits (CUSA13762 hunt, poke/freeze/cheat). Marked `done`. Phase 4 `not_started`; no `plugin/`. |

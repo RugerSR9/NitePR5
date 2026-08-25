@@ -8,14 +8,9 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 ## Status
 
-Phase 3 is **code-complete**. Mock tests pass. The web UI can connect, scan, poke, watch, freeze, and load/save GoldHEN JSON.
+Phases 0–3 are **done**. The web UI is the shippable PC editor: connect, scan, poke, watch, freeze, and load/save GoldHEN JSON on hardware (**CUSA13762**).
 
-Hardware exit tests are still outstanding:
-
-- **Phase 2:** find a changing integer in CUSA13762 with a few Next Scans.
-- **Phase 3:** poke from hex, freeze it, save a cheat, reload and toggle.
-
-Do not start Phase 4 (`plugin/`) until those pass or you explicitly override. After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phase 4 (`plugin/`) is next and has not started. After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -127,8 +122,8 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 |---|---|---|
 | 0 Environment | done | etaHEN + ps5debug-NG from this PC |
 | 1 Connect + peephole | done | Web UI reads 512 live bytes |
-| 2 Scan loop | code-complete | Turbo scan on-console; hardware hunt not run |
-| 3 Hex, poke, freeze, JSON | code-complete | First usable product; hardware poke/freeze/cheat not re-run |
+| 2 Scan loop | done | Turbo scan on-console; CUSA13762 hunt passed |
+| 3 Hex, poke, freeze, JSON | done | First usable product; poke/freeze/cheat passed on hardware |
 | 4 Plugin daemon | not started | Freezes/cheats on-console with no overlay |
 | 5 Overlay spike | not started | See-through TV panel (one backend) |
 | 6 Backlog | parked | Shared sessions, pointer/AOB, etc. — only if asked |

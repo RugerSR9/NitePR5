@@ -6,26 +6,25 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ---
 
-## Next orchestrator — start here (2026-08-24)
+## Next orchestrator — start here (2026-08-25)
 
-**Do not start Phase 4.** Do not create `plugin/` or `overlay/`. Do not re-implement Phases 0–3.
+Phases **0–3 are `done`** on hardware (user 2026-08-25). Next implementation target is **Phase 4** (etaHEN plugin daemon). Do not create `plugin/` until that phase starts. Do not create `overlay/` until Phase 5. Do not re-implement Phases 0–3.
 
 | Fact | Value |
 |---|---|
-| Phases 0–1 | `done` |
-| Phases 2–3 | `code_complete` (hardware exits **not** run) |
-| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **98 passed** (2026-08-24 PROC_WRITE two-phase) |
-| Last user work | Hex poke: watch/poll 200 then `timed out reading 4 bytes` on `POST /api/write` → 409 |
-| Git | Phase 1 on `main` (PR #1). Phase 2–3 + scan fix may be **uncommitted**. **Commit only if the user asks.** |
+| Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
+| Phase 4 | `not_started` — spawn ORCHESTRATION Phase 4 playbook when the user asks |
+| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **106 passed** (2026-08-25 VA-align + tracing) |
+| Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
 
-### Last live incident (must re-test after reconnect)
+### Last live incident (fixed; hardware re-verified 2026-08-25)
 
 User First Scan (exact, common value) then:
 
 1. `server declined unknown snapshot (snapshot_ok=0)`
 2. Next command: `timed out reading 4 bytes from 192.168.4.42:744` + rest-mode hint
 
-**Cause (fixed in tree, not re-verified on hardware):** exact first scan overflowed the 256 MiB resident match list. Old path used **single-range** resident START, which streams the full hit list on overflow; draining that as a u64 stream **desynced :744**. Then the client retried a **full-region snapshot**, which the console declined (`snapshot_ok=0` = ENOSPC / bitmap > 448 MiB / `/data` full). The 4-byte timeout is leftover protocol, **not** rest mode.
+**Cause (fixed; user confirmed editor loop works):** exact first scan overflowed the 256 MiB resident match list. Old path used **single-range** resident START, which streams the full hit list on overflow; draining that as a u64 stream **desynced :744**. Then the client retried a **full-region snapshot**, which the console declined (`snapshot_ok=0` = ENOSPC / bitmap > 448 MiB / `/data` full). The 4-byte timeout is leftover protocol, **not** rest mode.
 
 **Fix in tree:**
 
@@ -37,7 +36,7 @@ User First Scan (exact, common value) then:
 
 Helpers: `web/nitepr5_core/scan.py` — `snapshot_fits`, `snapshot_bitmap_bytes`, `drain_result_blocks`, `TOO_MANY_MATCHES`. Tests: `test_snapshot_fits_bitmap_cap`, maps-fallback GPU excluded (`count == 3`).
 
-### Freeze / cheat save (fixed 2026-08-24, restart uvicorn)
+### Freeze / cheat save (fixed 2026-08-24; hardware re-verified 2026-08-25)
 
 Live: `POST /api/freeze/tick` and `GET /api/watch/poll` (and often `GET /api/read`) returned **400** in a tight loop. Save freezes as cheat: **“No eboot.bin map — cannot compute offsets”**.
 
@@ -49,7 +48,7 @@ Tests: `test_write_waits_for_peer_hold_longer_than_quarter_second`, `test_droppe
 
 **One browser tab.** Two tabs both poll :744 through one Session and will fight. Close extras, restart uvicorn, Connect again.
 
-### PROC_WRITE hang (fixed 2026-08-24, restart uvicorn)
+### PROC_WRITE hang (fixed 2026-08-24; hardware re-verified 2026-08-25)
 
 Live: `GET /api/watch/poll` 200, then `NotConnected: timed out reading 4 bytes from 192.168.4.42:744` on `POST /api/write` 409. Later read/watch also 409.
 
@@ -61,11 +60,9 @@ Tests: `test_proc_write_phased_sends_16_byte_packet_then_payload`, `test_ui_paus
 
 ### What the next agent should do
 
-1. Restart uvicorn + hard-refresh the browser (`app.js` cache).
-2. User: **Disconnect then Connect** (or restart uvicorn). The old :744 session is likely desynced.
-3. Re-run First Scan on **CUSA13762** with a **less common changing integer** (not 0/1). Unknown-initial on the whole writable set can still decline if the snapshot is huge.
-4. If that hunt works, continue Phase 2 exit (Next Scan a few times) and Phase 3 exit (poke confirm → freeze → save GoldHEN JSON in `web/cheats/` → reload + toggle).
-5. Only then mark Phase 2/3 `done`. Still no Phase 4 unless the user overrides.
+Phase 4 when the user asks: ORCHESTRATION Phase 4 playbook — **one** worker, `plugin/` C + ps5-payload-sdk + etaHEN CMake. Notifications only (B1). No ShellUI, no game PRX, no `overlay/`.
+
+Until then: do not create `plugin/` or `overlay/`. Keep the web editor as the scanner. Paste Phase 0+1+2+3 blocks into every worker brief.
 
 ```powershell
 python -m pytest web/tests web/nitepr5_core/tests -q
@@ -84,9 +81,9 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — **only** after Phase 3 `done` or user override
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 3 is `done`; spawn when the user asks
 
-Forbidden until Phase 4/5: overlay, plugin, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`.
+Forbidden until Phase 4/5 starts: overlay, plugin, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`.
 
 ---
 
@@ -254,11 +251,11 @@ web/tests/{conftest.py,test_phase1_mock.py,http_read_contract.py,test_http_read_
 
 ---
 
-## Phase 2 — Scan loop (`code_complete` 2026-08-21; hardware exit **not** passed)
+## Phase 2 — Scan loop (`done` 2026-08-25)
 
 **Job:** classic NitePR search loop on the PC. Count-first; turbo on-console; ≤256 result rows.
 
-**Exit (ARCHITECTURE, not yet):** find a known changing integer in **CUSA13762** with a few next-scans. Do not mark `done` from mocks. Two live attempts were made; both failed for reasons below (now fixed in tree). Re-run the exit on a **restarted** uvicorn.
+**Exit (ARCHITECTURE, passed):** find a known changing integer in **CUSA13762** with a few next-scans. User confirmed 2026-08-25. Early live attempts failed (segmented START / snapshot cap / desync — see Next orchestrator); those fixes shipped before the passing hunt.
 
 `python -m pytest web/tests web/nitepr5_core/tests -q` → **49 passed**.
 
@@ -399,11 +396,11 @@ Also touched: `session.py`, `transport.py`, `constants.py` (`SCAN_IO_TIMEOUT`, `
 
 ---
 
-## Phase 3 — Hex, watch, freeze, JSON (`code_complete` 2026-08-21; hardware exit **not** passed)
+## Phase 3 — Hex, watch, freeze, JSON (`done` 2026-08-25)
 
 **Job:** first shippable editor without a TV UI.
 
-**Exit (ARCHITECTURE, not yet):** change a value in-game from hex; freeze it; save a cheat; reload the file and toggle it. Do not mark `done` from mocks.
+**Exit (ARCHITECTURE, passed):** change a value in-game from hex; freeze it; save a cheat; reload the file and toggle it. User confirmed 2026-08-25.
 
 `python -m pytest web/tests web/nitepr5_core/tests -q` → see STATUS (includes PROC_WRITE two-phase + freeze-tick lock + executable-map cheat tests).
 
@@ -503,7 +500,5 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 2 hardware | CUSA13762 changing-integer hunt (required before Phase 2 `done`) |
-| 3 hardware | poke, freeze, save JSON, reload + toggle (required before Phase 3 `done`) |
 | 4 | etaHEN plugin daemon |
 | 5 | Overlay spike B2 **or** B3 |
