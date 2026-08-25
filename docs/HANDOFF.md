@@ -72,7 +72,7 @@ python -m pytest web/tests web/nitepr5_core/tests -q
 python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
 ```
 
-UI: `http://127.0.0.1:1744` → attach `eboot.bin`. Host `192.168.4.42`. ps5debug-NG v1.3.0 via elfldr **9021** (not Toolbox PS5Debug). Rest mode **does** drop 744 after sleep; that is separate from the 4-byte desync.
+UI: `http://127.0.0.1:1744` → Connect → auto-opens `eboot.bin` when present. Hard-refresh after static changes. Host `192.168.4.42`. ps5debug-NG v1.3.0 via elfldr **9021** (not Toolbox PS5Debug). Rest mode **does** drop 744 after sleep; that is separate from the 4-byte desync.
 
 **Hex/watch/freeze poll ≠ hung scan.** After attach, uvicorn logs `GET /api/read` ~4 Hz, `GET /api/watch/poll` ~10 Hz, and `POST /api/freeze/tick` ~15 Hz — those must be **200**, not 400. `POST /api/scan/start` logs only when it **finishes**. During a hunt: `paused (scan)`; watch/freeze timers must stop.
 
@@ -349,7 +349,7 @@ Scan errors → 400 (`NotConnected` still 409). UI does **not** fetch results if
 
 ### UI
 
-Vanilla JS IIFE, `fetch('/api/...')` only. Scan section in `index.html` between maps and hex. Value: decimal or `0x` hex. First: Exact, optional Unknown checkbox. Next compare select. Buttons disabled while `scanBusy`; Next/Undo disabled until a hunt exists. Hex status: `peephole ~4 Hz` vs `paused (scan)`.
+Vanilla JS IIFE, `fetch('/api/...')` only. Scan lives in a **drawer**, not a stacked page section. Value: decimal or `0x` hex. First: Exact, optional Unknown checkbox. Next compare select. Buttons disabled while `scanBusy`; Next/Undo disabled until a hunt exists. Hex status: `live` vs `paused (scan)`.
 
 ### Mock
 
@@ -469,7 +469,7 @@ New 400s: `WatchLimit`, `FreezeLimit`, `NoWatch`, `NoFreeze`, `InvalidWriteSize`
 
 ### UI
 
-Vanilla JS IIFE. Hex bytes are clickable spans → prompt → **confirm** → `POST /api/write`. Watch poll 100 ms; freeze tick ~67 ms; both pause on `scanBusy`, hex Pause, and `visibilitychange` hidden. `resetTargetUi()` still runs **before** `/api/connect` and also stops watch/freeze timers. Scan count-first unchanged (no results fetch if count > 256).
+Vanilla JS IIFE. Hex canvas fills the viewport (ImHex-style chrome). Click selects; double-click or Enter prompts then **confirm** → `POST /api/write`. Watch poll 100 ms; freeze tick ~67 ms; both pause on `scanBusy`, hex Pause, and `visibilitychange` hidden. `resetTargetUi()` still runs **before** `/api/connect` and also stops watch/freeze timers. Scan count-first unchanged (no results fetch if count > 256). Drawers: scan, maps (filter + jump), watch, hold/freeze, cheats, processes. Go-to address and a typed inspector (u8/u16/u32/i32/f32) are UI-only.
 
 ### Orchestration (what we spawned)
 

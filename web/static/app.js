@@ -13,6 +13,7 @@
   const FREEZE_MAX = 32;
   const FREEZE_MS = 67; // ~15 Hz
   const FREEZE_N = 4;
+  const INSPECT_N = 4;
 
   const el = {
     host: document.getElementById("host"),
@@ -21,16 +22,23 @@
     btnDiscover: document.getElementById("btn-discover"),
     btnDisconnect: document.getElementById("btn-disconnect"),
     connectStatus: document.getElementById("connect-status"),
+    connDot: document.getElementById("conn-dot"),
     fgStatus: document.getElementById("fg-status"),
     procBody: document.getElementById("proc-body"),
+    procFilter: document.getElementById("proc-filter"),
     btnAttach: document.getElementById("btn-attach"),
+    btnProcessDrawer: document.getElementById("btn-process-drawer"),
+    processChipLabel: document.getElementById("process-chip-label"),
     attachStatus: document.getElementById("attach-status"),
     mapsBody: document.getElementById("maps-body"),
+    mapsFilter: document.getElementById("maps-filter"),
     hexMeta: document.getElementById("hex-meta"),
     btnPause: document.getElementById("btn-pause"),
     hexStatus: document.getElementById("hex-status"),
     hexBody: document.getElementById("hex-body"),
     hexSel: document.getElementById("hex-sel"),
+    hexEmpty: document.getElementById("hex-empty"),
+    hexWrap: document.getElementById("hex-wrap"),
     hexPokeU32: document.getElementById("hex-poke-u32"),
     btnWatchHex: document.getElementById("btn-watch-hex"),
     btnFreezeHex: document.getElementById("btn-freeze-hex"),
@@ -45,15 +53,18 @@
     scanStatus: document.getElementById("scan-status"),
     scanHint: document.getElementById("scan-hint"),
     scanBody: document.getElementById("scan-body"),
+    scanBadge: document.getElementById("scan-badge"),
     btnWatchAdd: document.getElementById("btn-watch-add"),
     watchCap: document.getElementById("watch-cap"),
     watchHint: document.getElementById("watch-hint"),
     watchStatus: document.getElementById("watch-status"),
     watchBody: document.getElementById("watch-body"),
+    watchBadge: document.getElementById("watch-badge"),
     freezeCap: document.getElementById("freeze-cap"),
     freezeHint: document.getElementById("freeze-hint"),
     freezeStatus: document.getElementById("freeze-status"),
     freezeBody: document.getElementById("freeze-body"),
+    freezeBadge: document.getElementById("freeze-badge"),
     cheatFile: document.getElementById("cheat-file"),
     btnCheatLoad: document.getElementById("btn-cheat-load"),
     btnCheatSave: document.getElementById("btn-cheat-save"),
@@ -64,6 +75,29 @@
     cheatGameName: document.getElementById("cheat-game-name"),
     cheatStatus: document.getElementById("cheat-status"),
     cheatMods: document.getElementById("cheat-mods"),
+    drawer: document.getElementById("drawer"),
+    gotoForm: document.getElementById("goto-form"),
+    gotoAddr: document.getElementById("goto-addr"),
+    btnGoto: document.getElementById("btn-goto"),
+    btnHelp: document.getElementById("btn-help"),
+    helpPop: document.getElementById("help-pop"),
+    insAddr: document.getElementById("ins-addr"),
+    insU8: document.getElementById("ins-u8"),
+    insU16: document.getElementById("ins-u16"),
+    insU32: document.getElementById("ins-u32"),
+    insI32: document.getElementById("ins-i32"),
+    insF32: document.getElementById("ins-f32"),
+    insHex: document.getElementById("ins-hex"),
+    sbConn: document.getElementById("sb-conn"),
+    sbTarget: document.getElementById("sb-target"),
+    sbScan: document.getElementById("sb-scan"),
+    sbRates: document.getElementById("sb-rates"),
+    railScan: document.getElementById("rail-scan"),
+    railMaps: document.getElementById("rail-maps"),
+    railWatch: document.getElementById("rail-watch"),
+    railFreeze: document.getElementById("rail-freeze"),
+    railCheats: document.getElementById("rail-cheats"),
+    railProcess: document.getElementById("rail-process"),
   };
 
   const state = {
@@ -71,6 +105,7 @@
     selectedPid: null,
     foregroundPid: null,
     foreground: null,
+    processes: [],
     attachedPid: null,
     maps: [],
     peepholeAddr: 0,
@@ -91,6 +126,8 @@
     freezeTimer: null,
     freezeInflight: false,
     cheatLoaded: false,
+    drawer: null,
+    hostLabel: "",
   };
 
   function setStatus(node, text, isErr) {
@@ -160,6 +197,7 @@
       String(err && err.message ? err.message : err) + " — Connect again.",
       true
     );
+    syncChrome();
   }
 
   function preferPid(processes, fg) {
@@ -171,6 +209,10 @@
     if (cusa) return cusa.pid;
     if (fg && fg.pid) return fg.pid;
     return processes.length ? processes[0].pid : null;
+  }
+
+  function processByPid(pid) {
+    return (state.processes || []).find(function (p) { return p.pid === pid; }) || null;
   }
 
   function firstWritable(maps) {
@@ -196,9 +238,106 @@
     return start;
   }
 
+  function openDrawer(name, toggle) {
+    if (!el.drawer) return;
+    if (toggle && state.drawer === name) {
+      closeDrawer();
+      return;
+    }
+    if (state.drawer === name) return;
+    state.drawer = name;
+    el.drawer.hidden = false;
+    const panels = el.drawer.querySelectorAll(".drawer-panel");
+    for (let i = 0; i < panels.length; i++) {
+      const id = panels[i].id.replace("-panel", "");
+      panels[i].hidden = id !== name;
+    }
+    const rails = document.querySelectorAll(".rail-btn");
+    for (let i = 0; i < rails.length; i++) {
+      rails[i].classList.toggle("active", rails[i].getAttribute("data-drawer") === name);
+    }
+  }
+
+  function closeDrawer() {
+    state.drawer = null;
+    if (el.drawer) el.drawer.hidden = true;
+    const rails = document.querySelectorAll(".rail-btn");
+    for (let i = 0; i < rails.length; i++) rails[i].classList.remove("active");
+  }
+
+  function syncChrome() {
+    const attached = state.connected && state.attachedPid != null;
+    const nW = (state.watches || []).length;
+    const nF = (state.freezes || []).length;
+    if (el.connDot) {
+      el.connDot.setAttribute(
+        "data-state",
+        state.scanBusy ? "busy" : (state.connected ? "on" : "off")
+      );
+    }
+    const proc = processByPid(state.attachedPid || state.selectedPid);
+    if (el.processChipLabel) {
+      if (proc) {
+        el.processChipLabel.textContent =
+          (proc.name || "pid") + " · " + (state.attachedPid || proc.pid);
+      } else if (state.attachedPid != null) {
+        el.processChipLabel.textContent = "pid " + state.attachedPid;
+      } else {
+        el.processChipLabel.textContent = state.connected ? "Pick a process" : "No process";
+      }
+    }
+    if (el.btnProcessDrawer) el.btnProcessDrawer.disabled = !state.connected;
+    const rails = [
+      el.railScan, el.railMaps, el.railWatch, el.railFreeze, el.railProcess, el.railCheats,
+    ];
+    rails.forEach(function (btn) {
+      if (!btn) return;
+      const needAttach = btn !== el.railCheats && btn !== el.railProcess;
+      btn.disabled = needAttach ? !attached : !state.connected;
+    });
+    if (el.gotoAddr) el.gotoAddr.disabled = !attached;
+    if (el.btnGoto) el.btnGoto.disabled = !attached;
+    if (el.hexEmpty) el.hexEmpty.hidden = !!attached;
+    if (el.hexWrap) el.hexWrap.hidden = !attached;
+    if (el.scanBadge) {
+      if (state.scanCount != null) {
+        el.scanBadge.hidden = false;
+        el.scanBadge.textContent = state.scanCount > 999 ? "999+" : String(state.scanCount);
+        el.scanBadge.classList.toggle("warn", state.scanCount > RESULTS_MAX);
+      } else {
+        el.scanBadge.hidden = true;
+      }
+    }
+    if (el.watchBadge) el.watchBadge.textContent = String(nW);
+    if (el.freezeBadge) el.freezeBadge.textContent = String(nF);
+    if (el.sbConn) {
+      el.sbConn.textContent = state.connected
+        ? ("Online · " + (state.hostLabel || el.host.value || "PS5"))
+        : "Offline";
+    }
+    if (el.sbTarget) {
+      el.sbTarget.textContent = attached
+        ? ("Open " + (proc && proc.name ? proc.name : "pid") + " " + state.attachedPid)
+        : (state.connected ? "No process open" : "—");
+    }
+    if (el.sbScan) {
+      if (state.scanBusy) el.sbScan.textContent = "Scanning…";
+      else if (state.scanCount != null) el.sbScan.textContent = state.scanCount + " matches";
+      else el.sbScan.textContent = "Scan idle";
+    }
+    if (el.sbRates) {
+      if (!attached) el.sbRates.textContent = "—";
+      else if (state.paused) el.sbRates.textContent = "Paused";
+      else el.sbRates.textContent = "Memory 4 Hz · watch 10 Hz · hold 15 Hz";
+    }
+  }
+
   function renderProcesses(processes, fgPid, selectedPid) {
     el.procBody.innerHTML = "";
-    processes.forEach(function (p) {
+    const q = String(el.procFilter && el.procFilter.value || "").toLowerCase();
+    (processes || []).forEach(function (p) {
+      const hay = (p.pid + " " + (p.name || "") + " " + (p.titleid || "")).toLowerCase();
+      if (q && hay.indexOf(q) === -1) return;
       const tr = document.createElement("tr");
       if (p.pid === fgPid) tr.classList.add("foreground");
       if (p.pid === selectedPid) tr.classList.add("selected");
@@ -211,6 +350,11 @@
         state.selectedPid = p.pid;
         renderProcesses(processes, fgPid, p.pid);
         el.btnAttach.disabled = !state.connected;
+        syncChrome();
+      });
+      tr.addEventListener("dblclick", function () {
+        state.selectedPid = p.pid;
+        onAttach();
       });
       el.procBody.appendChild(tr);
     });
@@ -223,17 +367,43 @@
       .replace(/>/g, "&gt;");
   }
 
+  function formatSize(n) {
+    if (!n) return "0";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10 * 1024 ? 1 : 0) + " KiB";
+    return (n / (1024 * 1024)).toFixed(1) + " MiB";
+  }
+
+  function jumpToAddr(addr, selected) {
+    if (state.attachedPid == null) return;
+    state.peepholeAddr = addr & ~0xf;
+    state.selectedAddr = selected != null ? selected : addr;
+    updateHexSel();
+    updateInspector();
+    if (!state.paused && !document.hidden && !state.scanBusy) {
+      tickHex();
+    } else {
+      renderHex(state.peepholeAddr, state.hexData, HEX_N);
+    }
+  }
+
   function renderMaps(maps, baseStart) {
     el.mapsBody.innerHTML = "";
-    maps.forEach(function (m) {
+    const q = String(el.mapsFilter && el.mapsFilter.value || "").toLowerCase();
+    (maps || []).forEach(function (m) {
+      const hay = ((m.name || "") + " " + hexAddr(m.start)).toLowerCase();
+      if (q && hay.indexOf(q) === -1) return;
       const tr = document.createElement("tr");
       if (baseStart != null && m.start === baseStart) tr.classList.add("selected");
       tr.innerHTML =
         "<td>" + escapeHtml(m.name || "") + "</td>" +
         "<td class=\"mono\">" + hexAddr(m.start) + "</td>" +
-        "<td class=\"mono\">" + hexAddr(m.end) + "</td>" +
         "<td>" + escapeHtml(m.perms || "") + "</td>" +
-        "<td>" + m.size + "</td>";
+        "<td>" + formatSize(m.size) + "</td>";
+      tr.addEventListener("click", function () {
+        jumpToAddr(m.start, m.start);
+        renderMaps(state.maps, m.start);
+      });
       el.mapsBody.appendChild(tr);
     });
   }
@@ -293,13 +463,68 @@
     return h;
   }
 
+  function f32leFromHex(hex) {
+    const bytes = bytesFromHex(hex);
+    if (bytes.length < 4) return null;
+    const buf = new ArrayBuffer(4);
+    const view = new DataView(buf);
+    view.setUint8(0, bytes[0]);
+    view.setUint8(1, bytes[1]);
+    view.setUint8(2, bytes[2]);
+    view.setUint8(3, bytes[3]);
+    const n = view.getFloat32(0, true);
+    if (!Number.isFinite(n)) return String(n);
+    const abs = Math.abs(n);
+    if (abs !== 0 && (abs < 1e-4 || abs >= 1e7)) return n.toExponential(4);
+    return String(Math.round(n * 1e6) / 1e6);
+  }
+
+  function updateInspector() {
+    const addr = state.selectedAddr;
+    if (addr == null) {
+      if (el.insAddr) el.insAddr.textContent = "—";
+      if (el.insU8) el.insU8.textContent = "—";
+      if (el.insU16) el.insU16.textContent = "—";
+      if (el.insU32) el.insU32.textContent = "—";
+      if (el.insI32) el.insI32.textContent = "—";
+      if (el.insF32) el.insF32.textContent = "—";
+      if (el.insHex) el.insHex.textContent = "—";
+      return;
+    }
+    const h1 = peekHexAt(addr, 1);
+    const h2 = peekHexAt(addr, 2);
+    const h4 = peekHexAt(addr, 4);
+    const u8 = h1 ? parseInt(h1, 16) : null;
+    const u16 = h2 && h2.length >= 4 ? (bytesFromHex(h2)[0] | (bytesFromHex(h2)[1] << 8)) : null;
+    const u32 = h4 && h4.length >= 8 ? u32leFromHex(h4) : null;
+    if (el.insAddr) el.insAddr.textContent = hexAddr(addr);
+    if (el.insU8) el.insU8.textContent = u8 == null ? "—" : String(u8);
+    if (el.insU16) el.insU16.textContent = u16 == null ? "—" : String(u16 >>> 0);
+    if (el.insU32) el.insU32.textContent = u32 == null ? "—" : String(u32);
+    if (el.insI32) el.insI32.textContent = u32 == null ? "—" : String(u32 | 0);
+    if (el.insF32) el.insF32.textContent = h4 && h4.length >= 8 ? (f32leFromHex(h4) || "—") : "—";
+    if (el.insHex) el.insHex.textContent = (h4 || h2 || h1 || "—");
+    if (el.hexPokeU32 && u32 != null && document.activeElement !== el.hexPokeU32) {
+      el.hexPokeU32.value = String(u32);
+    }
+  }
+
   function updateHexSel() {
     if (!el.hexSel) return;
     if (state.selectedAddr == null) {
       el.hexSel.textContent = "";
       return;
     }
-    el.hexSel.textContent = "sel " + hexAddr(state.selectedAddr);
+    el.hexSel.textContent = hexAddr(state.selectedAddr);
+  }
+
+  function byteClass(cellAddr) {
+    if (state.selectedAddr == null) return "";
+    if (state.selectedAddr === cellAddr) return " selected";
+    if (cellAddr > state.selectedAddr && cellAddr < state.selectedAddr + INSPECT_N) {
+      return " in-range";
+    }
+    return "";
   }
 
   function renderHex(addr, hexStr, n) {
@@ -310,33 +535,38 @@
       const rowAddr = addr + r * ROW_BYTES;
       const slice = bytes.slice(r * ROW_BYTES, r * ROW_BYTES + ROW_BYTES);
       const hexParts = [];
-      let ascii = "";
+      const asciiParts = [];
       for (let i = 0; i < ROW_BYTES; i++) {
         const b = slice[i];
         const cellAddr = rowAddr + i;
+        const klass = byteClass(cellAddr);
+        if (i > 0 && i % 4 === 0) hexParts.push(" ");
         if (b == null) {
-          hexParts.push("  ");
-          ascii += " ";
+          hexParts.push("<span class=\"byte\">  </span>");
+          asciiParts.push(" ");
         } else {
           const hx = b.toString(16).toUpperCase().padStart(2, "0");
-          const sel = state.selectedAddr === cellAddr ? " selected" : "";
           hexParts.push(
-            "<span class=\"byte" + sel + "\" data-addr=\"" + cellAddr + "\">" + hx + "</span>"
+            "<span class=\"byte" + klass + "\" data-addr=\"" + cellAddr + "\">" + hx + "</span>"
           );
-          ascii += asciiChar(b);
+          asciiParts.push(
+            "<span class=\"asc" + klass + "\" data-addr=\"" + cellAddr + "\">" +
+              escapeHtml(asciiChar(b)) + "</span>"
+          );
         }
       }
       rows.push(
         "<tr>" +
           "<td class=\"addr\">" + hexAddr(rowAddr) + "</td>" +
           "<td class=\"bytes\">" + hexParts.join(" ") + "</td>" +
-          "<td class=\"ascii\">" + escapeHtml(ascii) + "</td>" +
+          "<td class=\"ascii\">" + asciiParts.join("") + "</td>" +
         "</tr>"
       );
     }
     el.hexBody.innerHTML = rows.join("");
-    el.hexMeta.textContent = hexAddr(addr) + " · " + n + " bytes · 16×" + ROW_COUNT;
+    el.hexMeta.textContent = hexAddr(addr) + " · " + n + " bytes";
     updateHexSel();
+    updateInspector();
   }
 
   function parseScanValue(raw) {
@@ -349,6 +579,24 @@
     if (/^\d+$/.test(s)) {
       const n = parseInt(s, 10);
       return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  function parseGoto(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return null;
+    if (/^0x[0-9a-fA-F]+$/i.test(s)) {
+      const n = parseInt(s, 16);
+      return Number.isFinite(n) ? n >>> 0 : null;
+    }
+    if (/^[0-9a-fA-F]+$/i.test(s) && /[a-fA-F]/.test(s)) {
+      const n = parseInt(s, 16);
+      return Number.isFinite(n) ? n >>> 0 : null;
+    }
+    if (/^\d+$/.test(s)) {
+      const n = parseInt(s, 10);
+      return Number.isFinite(n) ? n >>> 0 : null;
     }
     return null;
   }
@@ -387,6 +635,7 @@
     for (let i = 0; i < watchBtns.length; i++) {
       watchBtns[i].disabled = !attached || busy || fullW;
     }
+    syncChrome();
   }
 
   function syncScanButtons() {
@@ -403,7 +652,7 @@
   function clearScanUi() {
     state.hasScan = false;
     state.scanCount = null;
-    el.scanCount.textContent = "Count: —";
+    el.scanCount.textContent = "—";
     el.scanHint.textContent = "";
     el.scanBody.innerHTML = "";
     setStatus(el.scanStatus, "");
@@ -418,15 +667,10 @@
       tr.innerHTML =
         "<td class=\"mono\">" + hexAddr(addr) + "</td>" +
         "<td class=\"mono\">" + u32leFromHex(row.current) + "</td>" +
-        "<td><button type=\"button\" class=\"btn-row btn-watch-hit\">Watch</button></td>";
+        "<td><button type=\"button\" class=\"btn-row btn-watch-hit\">Pin</button></td>";
       tr.addEventListener("click", function () {
         if (state.attachedPid == null) return;
-        state.peepholeAddr = addr;
-        state.selectedAddr = addr;
-        updateHexSel();
-        if (!state.paused && !document.hidden) {
-          tickHex();
-        }
+        jumpToAddr(addr, addr);
       });
       const btn = tr.querySelector("button");
       btn.addEventListener("click", function (ev) {
@@ -446,12 +690,13 @@
     }
     state.hasScan = true;
     state.scanCount = count;
-    el.scanCount.textContent = "Count: " + count;
+    el.scanCount.textContent = count === 1 ? "1 match" : (count + " matches");
     syncScanButtons();
+    openDrawer("scan");
     if (count > RESULTS_MAX) {
       el.scanBody.innerHTML = "";
       el.scanHint.textContent =
-        count + " matches — narrow in-game, then Next Scan";
+        count + " matches — change the value in-game, then Next Scan";
       setStatus(el.scanStatus, "");
       return;
     }
@@ -496,6 +741,7 @@
     const payload = scanPayload(kind);
     if (kind !== "undo" && payload == null) {
       setStatus(el.scanStatus, "Enter a value (decimal or 0x hex)", true);
+      openDrawer("scan");
       return;
     }
     const gen = state.scanGen;
@@ -528,6 +774,7 @@
     } catch (err) {
       if (gen !== state.scanGen) return;
       setStatus(el.scanStatus, String(err.message || err), true);
+      openDrawer("scan");
     } finally {
       if (gen === state.scanGen) {
         state.scanBusy = false;
@@ -576,16 +823,18 @@
     el.btnPause.disabled = true;
     el.mapsBody.innerHTML = "";
     el.hexBody.innerHTML = "";
-    el.hexMeta.textContent = "addr — · 512 bytes";
+    el.hexMeta.textContent = "No memory open";
     if (el.watchBody) el.watchBody.innerHTML = "";
     if (el.freezeBody) el.freezeBody.innerHTML = "";
     if (el.cheatMods) el.cheatMods.innerHTML = "";
     updateHexSel();
+    updateInspector();
     setStatus(el.attachStatus, "");
     setStatus(el.hexStatus, "");
     setStatus(el.watchStatus, "");
     setStatus(el.freezeStatus, "");
     clearScanUi();
+    syncChrome();
   }
 
   async function tickHex() {
@@ -605,7 +854,7 @@
         return;
       }
       renderHex(body.addr, body.data, body.n);
-      setStatus(el.hexStatus, state.paused ? "paused" : "peephole ~4 Hz", false);
+      setStatus(el.hexStatus, state.paused ? "paused" : "live", false);
     } catch (err) {
       if (state.attachedPid !== pid) {
         return;
@@ -624,12 +873,12 @@
   }
 
   async function onDiscover() {
-    setStatus(el.connectStatus, "Discovering…");
+    setStatus(el.connectStatus, "Looking for a PS5…");
     try {
       const body = await api("/api/discover", { method: "POST" });
       const hosts = body.hosts || [];
       if (!hosts.length) {
-        setStatus(el.connectStatus, "No hosts on UDP 1010", true);
+        setStatus(el.connectStatus, "No console on this LAN", true);
         return;
       }
       el.host.value = hosts[0];
@@ -645,7 +894,7 @@
     if (el.cheatVersion && fg.app_ver) el.cheatVersion.value = fg.app_ver;
     if (el.cheatGameName && fg.name) el.cheatGameName.value = fg.name;
     if (el.cheatFilename && fg.titleid) {
-      const ver = String(fg.app_ver || "00.00").replace(/\s/g, "") || "00.00";
+      const ver = String(fg.app_ver || "00.00").replace(/\s+/g, "") || "00.00";
       el.cheatFilename.value = fg.titleid + "_" + ver + ".json";
     }
   }
@@ -654,6 +903,7 @@
     const procsBody = await api("/api/processes");
     const fg = await api("/api/foreground");
     const processes = procsBody.processes || [];
+    state.processes = processes;
     state.foregroundPid = fg.pid;
     state.foreground = fg;
     state.selectedPid = preferPid(processes, fg);
@@ -664,6 +914,8 @@
       : (fg.name || "") + " pid " + fg.pid + " " + (fg.titleid || "");
     el.fgStatus.textContent = "Foreground: " + where + ". eboot.bin / CUSA preferred.";
     el.btnAttach.disabled = state.selectedPid == null;
+    syncChrome();
+    return processes;
   }
 
   async function onConnect(ev) {
@@ -685,14 +937,23 @@
         body: JSON.stringify({ host: host }),
       });
       state.connected = true;
+      state.hostLabel = body.host || host;
       setStatus(el.connectStatus, "Connected to " + body.host);
-      await loadProcessList();
+      const processes = await loadProcessList();
       await refreshCheatFiles();
       syncScanButtons();
+      const eboot = (processes || []).find(function (p) { return p.name === "eboot.bin"; });
+      if (eboot) {
+        state.selectedPid = eboot.pid;
+        await onAttach();
+      } else {
+        openDrawer("process");
+      }
     } catch (err) {
       state.connected = false;
       el.btnAttach.disabled = true;
       setStatus(el.connectStatus, String(err.message || err), true);
+      syncChrome();
     }
   }
 
@@ -702,7 +963,10 @@
     state.selectedPid = null;
     state.foregroundPid = null;
     state.foreground = null;
+    state.processes = [];
+    state.hostLabel = "";
     el.btnAttach.disabled = true;
+    closeDrawer();
     try {
       await api("/api/disconnect", { method: "POST" });
     } catch (_) { /* still drop local state */ }
@@ -714,7 +978,7 @@
 
   async function onAttach() {
     if (state.selectedPid == null) return;
-    setStatus(el.attachStatus, "Attaching…");
+    setStatus(el.attachStatus, "Opening…");
     try {
       const att = await api("/api/attach_target", {
         method: "POST",
@@ -733,6 +997,7 @@
         el.attachStatus,
         "Attached pid " + att.pid + (base ? " · peephole " + hexAddr(base.start) : "")
       );
+      setStatus(el.connectStatus, "");
       state.paused = false;
       el.btnPause.textContent = "Pause";
       el.btnPause.disabled = false;
@@ -741,8 +1006,10 @@
       startHexPoll();
       startWatchPoll();
       startFreezeTick();
+      closeDrawer();
     } catch (err) {
       setStatus(el.attachStatus, String(err.message || err), true);
+      setStatus(el.connectStatus, String(err.message || err), true);
     }
   }
 
@@ -759,6 +1026,18 @@
       startWatchPoll();
       startFreezeTick();
     }
+    syncChrome();
+  }
+
+  function onGoto(ev) {
+    if (ev) ev.preventDefault();
+    if (state.attachedPid == null) return;
+    const addr = parseGoto(el.gotoAddr && el.gotoAddr.value);
+    if (addr == null) {
+      setStatus(el.hexStatus, "Go to a hex address (0x…) or decimal", true);
+      return;
+    }
+    jumpToAddr(addr, addr);
   }
 
   async function refreshWatchFreezeLists() {
@@ -812,20 +1091,15 @@
       const tr = document.createElement("tr");
       const live = formatLive(state.watchValues[w.id], w.n);
       tr.innerHTML =
-        "<td class=\"mono\">" + w.id + "</td>" +
         "<td class=\"mono\">" + hexAddr(w.addr) + "</td>" +
-        "<td class=\"mono\">" + w.n + "</td>" +
         "<td class=\"mono\" id=\"watch-live-" + w.id + "\">" + escapeHtml(live) + "</td>" +
-        "<td><button type=\"button\" class=\"btn-row btn-watch-rm\">Remove</button></td>" +
-        "<td><button type=\"button\" class=\"btn-row btn-watch-fz\">Freeze</button></td>";
+        "<td>" +
+          "<button type=\"button\" class=\"btn-row btn-watch-fz\">Hold</button> " +
+          "<button type=\"button\" class=\"btn-row btn-watch-rm\">✕</button>" +
+        "</td>";
       tr.addEventListener("click", function () {
         if (state.attachedPid == null) return;
-        state.peepholeAddr = w.addr;
-        state.selectedAddr = w.addr;
-        updateHexSel();
-        if (!state.paused && !document.hidden && !state.scanBusy) {
-          tickHex();
-        }
+        jumpToAddr(w.addr, w.addr);
       });
       tr.querySelector(".btn-watch-rm").addEventListener("click", function (ev) {
         ev.stopPropagation();
@@ -864,7 +1138,7 @@
     try {
       const body = await api("/api/watch/poll");
       applyWatchValues(body.values || []);
-      setStatus(el.watchStatus, "watch ~10 Hz");
+      setStatus(el.watchStatus, "");
     } catch (err) {
       if (isLostConnectionError(err)) {
         onLostConnection(err);
@@ -900,7 +1174,7 @@
         label: body.label || "",
       });
       renderWatchTable();
-      setStatus(el.watchStatus, "Watch " + body.id + " @ " + hexAddr(body.addr));
+      setStatus(el.watchStatus, "Pinned " + hexAddr(body.addr));
       if (!state.paused && !document.hidden && !state.scanBusy) {
         startWatchPoll();
       }
@@ -927,6 +1201,7 @@
   function onAddWatchClick() {
     if (state.attachedPid == null) return;
     addWatch(pokeTargetAddr(), WATCH_N, "");
+    openDrawer("watch");
   }
 
   function renderFreezeTable() {
@@ -935,10 +1210,13 @@
     (state.freezes || []).forEach(function (f) {
       const tr = document.createElement("tr");
       tr.innerHTML =
-        "<td class=\"mono\">" + f.id + "</td>" +
         "<td class=\"mono\">" + hexAddr(f.addr) + "</td>" +
         "<td class=\"mono\">" + escapeHtml(String(f.data || "").toUpperCase()) + "</td>" +
-        "<td><button type=\"button\" class=\"btn-row btn-freeze-rm\">Remove</button></td>";
+        "<td><button type=\"button\" class=\"btn-row btn-freeze-rm\">✕</button></td>";
+      tr.addEventListener("click", function () {
+        if (state.attachedPid == null) return;
+        jumpToAddr(f.addr, f.addr);
+      });
       tr.querySelector(".btn-freeze-rm").addEventListener("click", function (ev) {
         ev.stopPropagation();
         removeFreeze(f.id);
@@ -985,7 +1263,7 @@
       setStatus(el.freezeStatus, "No bytes to freeze yet", true);
       return;
     }
-    const msg = "Freeze " + hexAddr(addr) + " as " + data + "?\nWrites at ~15 Hz until removed.";
+    const msg = "Hold " + hexAddr(addr) + " as " + data + "?\nKeeps rewriting until you remove it.";
     if (!window.confirm(msg)) return;
     try {
       const body = await apiPost("/api/freeze", { addr: addr, data: data });
@@ -996,7 +1274,8 @@
         data: body.data,
       });
       renderFreezeTable();
-      setStatus(el.freezeStatus, "Freeze " + body.id + " @ " + hexAddr(body.addr));
+      setStatus(el.freezeStatus, "Holding " + hexAddr(body.addr));
+      openDrawer("freeze");
       if (!state.paused && !document.hidden && !state.scanBusy) {
         startFreezeTick();
       }
@@ -1022,7 +1301,7 @@
   function freezeFromWatch(w) {
     const hex = state.watchValues[w.id];
     if (!hex) {
-      setStatus(el.freezeStatus, "Wait for a watch poll, then Freeze", true);
+      setStatus(el.freezeStatus, "Wait for a live reading, then Hold", true);
       return;
     }
     addFreeze(w.addr, hex);
@@ -1032,7 +1311,7 @@
     const addr = pokeTargetAddr();
     let data = peekHexAt(addr, FREEZE_N);
     if (!data || data.length < FREEZE_N * 2) {
-      setStatus(el.freezeStatus, "Need " + FREEZE_N + " live peephole bytes at " + hexAddr(addr), true);
+      setStatus(el.freezeStatus, "Need " + FREEZE_N + " live bytes at " + hexAddr(addr), true);
       return;
     }
     data = data.slice(0, FREEZE_N * 2);
@@ -1083,14 +1362,22 @@
     });
   }
 
-  function onHexClick(ev) {
-    const span = ev.target && ev.target.closest ? ev.target.closest("span.byte") : null;
-    if (!span || state.attachedPid == null || state.scanBusy) return;
-    const addr = parseInt(span.getAttribute("data-addr"), 10);
+  function selectAddr(addr) {
+    if (state.attachedPid == null || state.scanBusy) return;
     if (!Number.isFinite(addr)) return;
+    if (addr < state.peepholeAddr || addr >= state.peepholeAddr + HEX_N) {
+      jumpToAddr(addr, addr);
+      return;
+    }
     state.selectedAddr = addr;
     updateHexSel();
-    const current = span.textContent || "00";
+    renderHex(state.peepholeAddr, state.hexData, HEX_N);
+  }
+
+  function pokeSelectedByte() {
+    if (state.attachedPid == null || state.scanBusy || state.selectedAddr == null) return;
+    const addr = state.selectedAddr;
+    const current = peekHexAt(addr, 1) || "00";
     const raw = window.prompt("New hex (1–4 bytes, no separators)", current);
     if (raw == null) {
       renderHex(state.peepholeAddr, state.hexData, HEX_N);
@@ -1104,6 +1391,21 @@
     }
     writeBytes(addr, newHex);
     renderHex(state.peepholeAddr, state.hexData, HEX_N);
+  }
+
+  function onHexClick(ev) {
+    const span = ev.target && ev.target.closest ? ev.target.closest("[data-addr]") : null;
+    if (!span || state.attachedPid == null || state.scanBusy) return;
+    const addr = parseInt(span.getAttribute("data-addr"), 10);
+    selectAddr(addr);
+  }
+
+  function onHexDblClick(ev) {
+    const span = ev.target && ev.target.closest ? ev.target.closest("[data-addr]") : null;
+    if (!span || state.attachedPid == null || state.scanBusy) return;
+    const addr = parseInt(span.getAttribute("data-addr"), 10);
+    selectAddr(addr);
+    pokeSelectedByte();
   }
 
   function onPokeU32() {
@@ -1267,6 +1569,65 @@
     }
   }
 
+  function typingInField(ev) {
+    const t = ev.target;
+    if (!t) return false;
+    const tag = String(t.tagName || "").toLowerCase();
+    return tag === "input" || tag === "select" || tag === "textarea";
+  }
+
+  function onKeyDown(ev) {
+    if (ev.key === "Escape") {
+      if (el.helpPop && !el.helpPop.hidden) {
+        el.helpPop.hidden = true;
+        return;
+      }
+      closeDrawer();
+      return;
+    }
+    if (typingInField(ev)) return;
+    if (ev.key === "?" || (ev.key === "/" && ev.shiftKey)) {
+      if (el.helpPop) el.helpPop.hidden = !el.helpPop.hidden;
+      ev.preventDefault();
+      return;
+    }
+    if (ev.key === "g" || ev.key === "G") {
+      if (el.gotoAddr && !el.gotoAddr.disabled) {
+        el.gotoAddr.focus();
+        el.gotoAddr.select();
+        ev.preventDefault();
+      }
+      return;
+    }
+    if (state.attachedPid == null || state.scanBusy) return;
+    if (ev.key === "Enter") {
+      pokeSelectedByte();
+      ev.preventDefault();
+      return;
+    }
+    if (ev.key === "PageDown") {
+      jumpToAddr(state.peepholeAddr + HEX_N, (state.selectedAddr || state.peepholeAddr) + HEX_N);
+      ev.preventDefault();
+      return;
+    }
+    if (ev.key === "PageUp") {
+      const next = Math.max(0, state.peepholeAddr - HEX_N);
+      jumpToAddr(next, Math.max(0, (state.selectedAddr || state.peepholeAddr) - HEX_N));
+      ev.preventDefault();
+      return;
+    }
+    const cur = state.selectedAddr;
+    if (cur == null) return;
+    let next = null;
+    if (ev.key === "ArrowLeft") next = cur - 1;
+    if (ev.key === "ArrowRight") next = cur + 1;
+    if (ev.key === "ArrowUp") next = cur - ROW_BYTES;
+    if (ev.key === "ArrowDown") next = cur + ROW_BYTES;
+    if (next == null || next < 0) return;
+    selectAddr(next);
+    ev.preventDefault();
+  }
+
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
       stopHexPoll();
@@ -1290,6 +1651,13 @@
     }
   }
 
+  function bindRail(btn) {
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      openDrawer(btn.getAttribute("data-drawer"), true);
+    });
+  }
+
   el.connectForm.addEventListener("submit", onConnect);
   el.btnDiscover.addEventListener("click", onDiscover);
   el.btnDisconnect.addEventListener("click", onDisconnect);
@@ -1298,7 +1666,10 @@
   el.btnScanFirst.addEventListener("click", function () { runScan("first"); });
   el.btnScanNext.addEventListener("click", function () { runScan("next"); });
   el.btnScanUndo.addEventListener("click", function () { runScan("undo"); });
-  if (el.hexBody) el.hexBody.addEventListener("click", onHexClick);
+  if (el.hexBody) {
+    el.hexBody.addEventListener("click", onHexClick);
+    el.hexBody.addEventListener("dblclick", onHexDblClick);
+  }
   if (el.btnWatchAdd) el.btnWatchAdd.addEventListener("click", onAddWatchClick);
   if (el.btnWatchHex) el.btnWatchHex.addEventListener("click", onAddWatchClick);
   if (el.btnFreezeHex) el.btnFreezeHex.addEventListener("click", freezeFromHex);
@@ -1308,6 +1679,33 @@
   if (el.btnCheatSaveFreezes) {
     el.btnCheatSaveFreezes.addEventListener("click", onCheatSaveFreezes);
   }
+  if (el.gotoForm) el.gotoForm.addEventListener("submit", onGoto);
+  if (el.btnProcessDrawer) {
+    el.btnProcessDrawer.addEventListener("click", function () { openDrawer("process", true); });
+  }
+  if (el.procFilter) {
+    el.procFilter.addEventListener("input", function () {
+      renderProcesses(state.processes, state.foregroundPid, state.selectedPid);
+    });
+  }
+  if (el.mapsFilter) {
+    el.mapsFilter.addEventListener("input", function () {
+      renderMaps(state.maps, state.peepholeAddr);
+    });
+  }
+  if (el.btnHelp && el.helpPop) {
+    el.btnHelp.addEventListener("click", function () {
+      el.helpPop.hidden = !el.helpPop.hidden;
+    });
+  }
+  bindRail(el.railScan);
+  bindRail(el.railMaps);
+  bindRail(el.railWatch);
+  bindRail(el.railFreeze);
+  bindRail(el.railCheats);
+  bindRail(el.railProcess);
+  document.addEventListener("keydown", onKeyDown);
   prefillHost();
   syncScanButtons();
+  syncChrome();
 })();
