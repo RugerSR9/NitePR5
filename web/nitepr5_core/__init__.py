@@ -25,6 +25,7 @@ from .constants import (
 from .errors import (
     ConnectFailed,
     FreezeLimit,
+    InvalidAddress,
     InvalidCheat,
     InvalidFreezeSize,
     InvalidReadSize,
@@ -87,6 +88,7 @@ __all__ = [
     "ConnectFailed",
     "FreezeEntry",
     "FreezeLimit",
+    "InvalidAddress",
     "InvalidCheat",
     "InvalidFreezeSize",
     "InvalidReadSize",

@@ -15,6 +15,7 @@ from nitepr5_core import (
     HEX_PEEPHOLE_DEFAULT,
     READ_MAX,
     ForegroundInfo,
+    InvalidAddress,
     InvalidReadSize,
     MockTransport,
     NoTarget,
@@ -57,6 +58,23 @@ def test_read_512_and_4096_succeed_4097_and_0_fail(connected: tuple[Session, Moc
         session.read(MockTransport.EBOOT_PID, addr, 4097)
     with pytest.raises(InvalidReadSize):
         session.read(MockTransport.EBOOT_PID, addr, 0)
+
+
+def test_read_rejects_negative_and_oversize_addr(
+    connected: tuple[Session, MockTransport],
+) -> None:
+    """PROC_READ packs address as u64; a JS 32-bit align used to send negatives."""
+    session, _transport = connected
+    session.attach_target(MockTransport.EBOOT_PID)
+    with pytest.raises(InvalidAddress):
+        session.read(None, -389259952, 512)
+    with pytest.raises(InvalidAddress):
+        session.read(None, 1 << 64, 16)
+    with pytest.raises(InvalidAddress):
+        session.read(None, True, 16)  # type: ignore[arg-type]
+    data = session.read(None, MockTransport.RAM_BASE, 16)
+    assert len(data) == 16
+    assert MockTransport.RAM_BASE > 0xFFFFFFFF
 
 
 def test_reconnect_clears_target_and_maps_cache(

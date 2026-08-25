@@ -3,208 +3,317 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NitePR5</title>
+  <title>NitePR5 — Memory Editor</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>NitePR5</h1>
-    <p class="tagline">PS5Debug peephole + scan + watch · FW 9.60 · 127.0.0.1:1744</p>
-  </header>
+  <div id="app">
+    <header class="titlebar">
+      <div class="brand" title="NitePR5">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M14.2 5.4A7.2 7.2 0 1 0 18.6 14 6.2 6.2 0 0 1 14.2 5.4Z" fill="currentColor"/>
+        </svg>
+        <span class="brand-name">NitePR<span>5</span></span>
+      </div>
 
-  <section id="connect-panel">
-    <h2>Connect</h2>
-    <form id="connect-form">
-      <label for="host">PS5 host</label>
-      <input id="host" name="host" type="text" placeholder="192.168.4.42" autocomplete="off" spellcheck="false">
-      <button type="submit" id="btn-connect">Connect</button>
-      <button type="button" id="btn-discover">Discover</button>
-      <button type="button" id="btn-disconnect">Disconnect</button>
-    </form>
-    <p id="connect-status" class="status" role="status"></p>
-  </section>
+      <form id="connect-form" class="connect-cluster">
+        <span id="conn-dot" class="dot" data-state="off" aria-hidden="true"></span>
+        <label class="sr-only" for="host">PS5 host</label>
+        <input id="host" name="host" type="text" maxlength="15" size="15" placeholder="192.168.0.1" autocomplete="off" spellcheck="false">
+        <button type="submit" id="btn-connect">Connect</button>
+        <button type="button" id="btn-discover" class="ghost" title="UDP 1010">Find</button>
+        <button type="button" id="btn-disconnect" class="ghost">Disconnect</button>
+      </form>
 
-  <section id="process-panel">
-    <h2>Processes</h2>
-    <p id="fg-status" class="muted">Connect to list processes. Foreground is highlighted.</p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>PID</th>
-            <th>Name</th>
-            <th>Title ID</th>
-          </tr>
-        </thead>
-        <tbody id="proc-body"></tbody>
-      </table>
-    </div>
-    <button type="button" id="btn-attach" disabled>Attach selected</button>
-    <p id="attach-status" class="status" role="status"></p>
-  </section>
+      <div class="process-cluster">
+        <button type="button" id="btn-process-drawer" class="chip" disabled title="Choose process">
+          <span id="process-chip-label">No process</span>
+        </button>
+        <button type="button" id="btn-attach" disabled>Open</button>
+      </div>
 
-  <section id="maps-panel">
-    <h2>Maps</h2>
-    <p class="muted">Metadata only. Hex uses the first writable region as the peephole base — regions are not dumped.</p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Perms</th>
-            <th>Size</th>
-          </tr>
-        </thead>
-        <tbody id="maps-body"></tbody>
-      </table>
-    </div>
-  </section>
+      <form id="goto-form" class="goto-cluster">
+        <label class="sr-only" for="goto-addr">Go to address</label>
+        <input id="goto-addr" name="goto-addr" type="text" placeholder="Go to 0x…" autocomplete="off" spellcheck="false" disabled>
+        <button type="submit" id="btn-goto" disabled>Go</button>
+      </form>
 
-  <section id="scan-panel">
-    <h2>Scan</h2>
-    <p class="muted">Count-first turbo scan on writable cached regions. Fetch at most 256 rows — never a RAM dump.</p>
-    <div class="scan-controls">
-      <label for="scan-value">Value</label>
-      <input id="scan-value" name="scan-value" type="text" placeholder="100 or 0x64" autocomplete="off" spellcheck="false">
-      <span class="muted">First: Exact</span>
-      <label class="check">
-        <input id="scan-unknown" type="checkbox">
-        Unknown initial
-      </label>
-      <label for="scan-next-compare">Next</label>
-      <select id="scan-next-compare">
-        <option value="exact" selected>exact</option>
-        <option value="increased">increased</option>
-        <option value="decreased">decreased</option>
-        <option value="changed">changed</option>
-        <option value="unchanged">unchanged</option>
-      </select>
-      <button type="button" id="btn-scan-first" disabled>First Scan</button>
-      <button type="button" id="btn-scan-next" disabled>Next Scan</button>
-      <button type="button" id="btn-scan-undo" disabled>Undo</button>
-    </div>
-    <p id="scan-count" class="scan-count" role="status">Count: —</p>
-    <p id="scan-status" class="status" role="status"></p>
-    <p id="scan-hint" class="muted"></p>
-    <div class="table-wrap scan-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Address</th>
-            <th>Current (u32)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="scan-body"></tbody>
-      </table>
-    </div>
-  </section>
+      <div class="title-actions">
+        <button type="button" id="btn-pause" class="ghost" disabled>Pause</button>
+        <button type="button" id="btn-help" class="icon-btn" title="Shortcuts" aria-label="Shortcuts">?</button>
+      </div>
+    </header>
 
-  <section id="hex-panel">
-    <h2>Hex peephole</h2>
-    <div class="hex-toolbar">
-      <span id="hex-meta" class="mono">addr — · 512 bytes</span>
-      <button type="button" id="btn-pause" disabled>Pause</button>
-      <span id="hex-status" class="muted" role="status"></span>
-    </div>
-    <div class="hex-toolbar poke-toolbar">
-      <button type="button" id="btn-watch-hex" disabled>Watch selected</button>
-      <button type="button" id="btn-freeze-hex" disabled>Freeze 4 bytes</button>
-      <label for="hex-poke-u32">Poke u32</label>
-      <input id="hex-poke-u32" name="hex-poke-u32" type="text" placeholder="100 or 0x64" autocomplete="off" spellcheck="false">
-      <button type="button" id="btn-poke-u32" disabled>Poke u32</button>
-      <span id="hex-sel" class="muted mono"></span>
-    </div>
-    <div class="table-wrap hex-wrap">
-      <table class="hex">
-        <thead>
-          <tr>
-            <th>Address</th>
-            <th>00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F</th>
-            <th>ASCII</th>
-          </tr>
-        </thead>
-        <tbody id="hex-body"></tbody>
-      </table>
-    </div>
-  </section>
+    <p id="connect-status" class="status toast" role="status"></p>
+    <p id="attach-status" class="sr-only" role="status"></p>
+    <p id="fg-status" class="sr-only">Connect to list processes. Foreground is highlighted.</p>
 
-  <section id="watch-panel">
-    <h2>Watch</h2>
-    <p class="muted">Pinned addresses only (max 64, ~10 Hz). Live bytes — not a RAM dump.</p>
-    <div class="scan-controls">
-      <button type="button" id="btn-watch-add" disabled>Add watch</button>
-      <span id="watch-cap" class="muted">0/64</span>
-      <span id="watch-hint" class="muted"></span>
-    </div>
-    <p id="watch-status" class="status" role="status"></p>
-    <div class="table-wrap scan-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Address</th>
-            <th>n</th>
-            <th>Live (hex / u32)</th>
-            <th></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="watch-body"></tbody>
-      </table>
-    </div>
-  </section>
+    <div class="workspace">
+      <nav class="rail" aria-label="Tools">
+        <button type="button" class="rail-btn" data-drawer="scan" id="rail-scan" disabled title="Scan">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16.5 20 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>Scan</span>
+          <b id="scan-badge" hidden></b>
+        </button>
+        <button type="button" class="rail-btn" data-drawer="maps" id="rail-maps" disabled title="Memory maps">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 10 4l4 3 6-2.5V18l-6 2.5-4-3-6 2.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 4v14M14 7v14" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span>Maps</span>
+        </button>
+        <button type="button" class="rail-btn" data-drawer="watch" id="rail-watch" disabled title="Watch list">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5 14.2 9l5 .6-3.7 3.4.9 4.9L12 15.8 7.6 17.9l.9-4.9L4.8 9.6l5-.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span>Watch</span>
+          <b id="watch-badge">0</b>
+        </button>
+        <button type="button" class="rail-btn" data-drawer="freeze" id="rail-freeze" disabled title="Frozen values">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5.5 6.5l13 11M18.5 6.5l-13 11M4 12h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span>Hold</span>
+          <b id="freeze-badge">0</b>
+        </button>
+        <button type="button" class="rail-btn" data-drawer="cheats" id="rail-cheats" disabled title="Cheat files">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14 4.5V10h5.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span>Cheats</span>
+        </button>
+        <button type="button" class="rail-btn" data-drawer="process" id="rail-process" disabled title="Processes">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="5" width="15" height="14" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h8M8 12.5h8M8 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span>Procs</span>
+        </button>
+      </nav>
 
-  <section id="freeze-panel">
-    <h2>Freeze</h2>
-    <p class="muted">Max 32 addresses, 15 Hz bulk write. The UI owns the timer — core does not tick by itself.</p>
-    <div class="scan-controls">
-      <span id="freeze-cap" class="muted">0/32</span>
-      <span id="freeze-hint" class="muted"></span>
-    </div>
-    <p id="freeze-status" class="status" role="status"></p>
-    <div class="table-wrap scan-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Address</th>
-            <th>Data (hex)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="freeze-body"></tbody>
-      </table>
-    </div>
-  </section>
+      <div class="stage">
+      <aside id="drawer" class="drawer" hidden>
+        <section id="scan-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Scan</h2>
+            <p class="muted">Find a value in-game, then Next Scan to narrow. Writable cached memory only.</p>
+          </header>
+          <div class="scan-controls">
+            <label for="scan-value">Value</label>
+            <input id="scan-value" name="scan-value" type="text" placeholder="100 or 0x64" autocomplete="off" spellcheck="false">
+            <label class="check">
+              <input id="scan-unknown" type="checkbox">
+              Unknown
+            </label>
+            <label for="scan-next-compare">Then</label>
+            <select id="scan-next-compare">
+              <option value="exact" selected>Still this value</option>
+              <option value="increased">Increased</option>
+              <option value="decreased">Decreased</option>
+              <option value="changed">Changed</option>
+              <option value="unchanged">Unchanged</option>
+            </select>
+            <button type="button" id="btn-scan-first" class="primary" disabled>First Scan</button>
+            <button type="button" id="btn-scan-next" disabled>Next</button>
+            <button type="button" id="btn-scan-undo" class="ghost" disabled>Undo</button>
+          </div>
+          <p id="scan-count" class="scan-count" role="status">—</p>
+          <p id="scan-status" class="status" role="status"></p>
+          <p id="scan-hint" class="muted"></p>
+          <div class="table-wrap scan-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  <th>Value</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="scan-body"></tbody>
+            </table>
+          </div>
+        </section>
 
-  <section id="cheat-panel">
-    <h2>Cheats</h2>
-    <p class="muted">GoldHEN JSON on this PC (<span class="mono">web/cheats/</span>). Never writes <span class="mono">/data/etaHEN/cheats/</span>.</p>
-    <div class="scan-controls">
-      <label for="cheat-file">File</label>
-      <select id="cheat-file">
-        <option value="">—</option>
-      </select>
-      <button type="button" id="btn-cheat-load" disabled>Load</button>
-      <button type="button" id="btn-cheat-save" disabled>Save</button>
-      <button type="button" id="btn-cheat-save-freezes" disabled>Save freezes as cheat</button>
+        <section id="maps-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Maps</h2>
+            <p class="muted">Jump the editor to a mapped region. Names only — regions are not dumped.</p>
+          </header>
+          <label class="sr-only" for="maps-filter">Filter maps</label>
+          <input id="maps-filter" type="text" placeholder="Filter maps…" autocomplete="off" spellcheck="false">
+          <div class="table-wrap maps-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Start</th>
+                  <th>Perms</th>
+                  <th>Size</th>
+                </tr>
+              </thead>
+              <tbody id="maps-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="watch-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Watch</h2>
+            <p class="muted">Pinned addresses, live. Max 64.</p>
+          </header>
+          <div class="scan-controls">
+            <button type="button" id="btn-watch-add" disabled>Pin selection</button>
+            <span id="watch-cap" class="muted">0/64</span>
+            <span id="watch-hint" class="muted"></span>
+          </div>
+          <p id="watch-status" class="status" role="status"></p>
+          <div class="table-wrap scan-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  <th>Live</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="watch-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="freeze-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Hold</h2>
+            <p class="muted">Rewrite these bytes while you play. Max 32.</p>
+          </header>
+          <div class="scan-controls">
+            <span id="freeze-cap" class="muted">0/32</span>
+            <span id="freeze-hint" class="muted"></span>
+          </div>
+          <p id="freeze-status" class="status" role="status"></p>
+          <div class="table-wrap scan-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  <th>Held</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="freeze-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="cheat-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Cheats</h2>
+            <p class="muted">GoldHEN JSON on this PC. Toggle mods after load.</p>
+          </header>
+          <div class="scan-controls">
+            <label for="cheat-file">File</label>
+            <select id="cheat-file">
+              <option value="">—</option>
+            </select>
+            <button type="button" id="btn-cheat-load" disabled>Load</button>
+            <button type="button" id="btn-cheat-save" disabled>Save</button>
+            <button type="button" id="btn-cheat-save-freezes" disabled>Export holds</button>
+          </div>
+          <div class="cheat-meta">
+            <label for="cheat-filename">Save as</label>
+            <input id="cheat-filename" name="cheat-filename" type="text" placeholder="CUSA00000_01.00.json" autocomplete="off" spellcheck="false">
+            <label for="cheat-id">Title</label>
+            <input id="cheat-id" name="cheat-id" type="text" placeholder="CUSA00000" autocomplete="off" spellcheck="false">
+            <label for="cheat-version">Ver</label>
+            <input id="cheat-version" name="cheat-version" type="text" placeholder="01.00" autocomplete="off" spellcheck="false">
+            <label for="cheat-game-name">Name</label>
+            <input id="cheat-game-name" name="cheat-game-name" type="text" placeholder="Game" autocomplete="off" spellcheck="false">
+          </div>
+          <p id="cheat-status" class="status" role="status"></p>
+          <div id="cheat-mods" class="cheat-mods"></div>
+        </section>
+
+        <section id="process-panel" class="drawer-panel" hidden>
+          <header class="drawer-head">
+            <h2>Processes</h2>
+            <p class="muted" id="proc-help">Foreground is marked. Games show as eboot.bin.</p>
+          </header>
+          <label class="sr-only" for="proc-filter">Filter processes</label>
+          <input id="proc-filter" type="text" placeholder="Filter processes…" autocomplete="off" spellcheck="false">
+          <div class="table-wrap proc-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>Name</th>
+                  <th>Title</th>
+                </tr>
+              </thead>
+              <tbody id="proc-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </aside>
+
+      <main id="hex-panel" class="hex-stage">
+        <div class="hex-toolbar">
+          <span id="hex-meta" class="mono">No memory open</span>
+          <span id="hex-sel" class="muted mono"></span>
+          <span id="hex-status" class="muted" role="status"></span>
+          <div class="hex-toolbar-actions">
+            <button type="button" id="btn-watch-hex" disabled>Pin</button>
+            <button type="button" id="btn-freeze-hex" disabled>Hold</button>
+            <label for="hex-poke-u32">Write</label>
+            <input id="hex-poke-u32" name="hex-poke-u32" type="text" placeholder="u32" autocomplete="off" spellcheck="false">
+            <button type="button" id="btn-poke-u32" class="danger" disabled>Write</button>
+          </div>
+        </div>
+        <div id="hex-empty" class="hex-empty">
+          <p>Memory Editor</p>
+          <p class="muted">Connect to a PS5, open the game process, and this grid becomes the live 512-byte window you edit.</p>
+        </div>
+        <div class="table-wrap hex-wrap" hidden id="hex-wrap">
+          <table class="hex">
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>00 01 02 03  04 05 06 07  08 09 0A 0B  0C 0D 0E 0F</th>
+                <th>ASCII</th>
+              </tr>
+            </thead>
+            <tbody id="hex-body"></tbody>
+          </table>
+        </div>
+      </main>
+      </div>
+
+      <aside class="inspector" aria-label="Selection">
+        <h2>Selection</h2>
+        <dl id="inspect-grid" class="inspect-grid">
+          <dt>Addr</dt><dd id="ins-addr" class="mono">—</dd>
+          <dt>u8</dt><dd id="ins-u8" class="mono">—</dd>
+          <dt>u16</dt><dd id="ins-u16" class="mono">—</dd>
+          <dt>u32</dt><dd id="ins-u32" class="mono">—</dd>
+          <dt>i32</dt><dd id="ins-i32" class="mono">—</dd>
+          <dt>f32</dt><dd id="ins-f32" class="mono">—</dd>
+          <dt>Hex</dt><dd id="ins-hex" class="mono">—</dd>
+        </dl>
+        <p class="inspect-note muted">Little-endian · click a byte to select · double-click to patch</p>
+      </aside>
     </div>
-    <div class="scan-controls">
-      <label for="cheat-filename">Save as</label>
-      <input id="cheat-filename" name="cheat-filename" type="text" placeholder="CUSA00000_01.00.json" autocomplete="off" spellcheck="false">
-      <label for="cheat-id">id</label>
-      <input id="cheat-id" name="cheat-id" type="text" placeholder="CUSA00000" autocomplete="off" spellcheck="false">
-      <label for="cheat-version">version</label>
-      <input id="cheat-version" name="cheat-version" type="text" placeholder="01.00" autocomplete="off" spellcheck="false">
-      <label for="cheat-game-name">name</label>
-      <input id="cheat-game-name" name="cheat-game-name" type="text" placeholder="Game Title" autocomplete="off" spellcheck="false">
-    </div>
-    <p id="cheat-status" class="status" role="status"></p>
-    <div id="cheat-mods" class="cheat-mods"></div>
-  </section>
+
+    <footer class="statusbar">
+      <span id="sb-conn">Offline</span>
+      <span id="sb-target">—</span>
+      <span id="sb-scan">Scan idle</span>
+      <span id="sb-rates">—</span>
+    </footer>
+  </div>
+
+  <div id="help-pop" class="help-pop" hidden>
+    <h3>Shortcuts</h3>
+    <ul>
+      <li><kbd>G</kbd> Go to address</li>
+      <li><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> Move selection</li>
+      <li><kbd>PgUp</kbd> <kbd>PgDn</kbd> Slide the window</li>
+      <li><kbd>Enter</kbd> Patch selected byte</li>
+      <li><kbd>Esc</kbd> Close a panel</li>
+    </ul>
+    <p class="muted">Writes always ask before they hit the console. One browser tab only.</p>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

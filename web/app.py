@@ -9,12 +9,15 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from tracing import flush_tracing, instrument_app
 
 from nitepr5_core import (
     HEX_PEEPHOLE_DEFAULT,
@@ -26,6 +29,7 @@ from nitepr5_core import (
     FreezeEntry,
     FreezeLimit,
     ForegroundInfo,
+    InvalidAddress,
     InvalidCheat,
     InvalidFreezeSize,
     InvalidReadSize,
@@ -84,7 +88,14 @@ def _make_session() -> Session:
 # One process-global Session. Logical attach only — never PT_ATTACH.
 SESSION = _make_session()
 
-app = FastAPI(title="NitePR5", docs_url=None, redoc_url=None)
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    yield
+    flush_tracing()
+
+
+app = FastAPI(title="NitePR5", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
 
 class ConnectBody(BaseModel):
@@ -160,6 +171,7 @@ _HTTP_400 = (
     InvalidScanRegions,
     InvalidScanValue,
     InvalidScanCompare,
+    InvalidAddress,
     WatchLimit,
     FreezeLimit,
     NoWatch,
@@ -488,6 +500,8 @@ def api_cheat() -> dict:
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+instrument_app(app, SESSION)
 
 
 if __name__ == "__main__":
