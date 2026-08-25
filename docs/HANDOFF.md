@@ -6,7 +6,7 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ---
 
-## Next orchestrator — start here (2026-08-23)
+## Next orchestrator — start here (2026-08-24)
 
 **Do not start Phase 4.** Do not create `plugin/` or `overlay/`. Do not re-implement Phases 0–3.
 
@@ -14,8 +14,8 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 |---|---|
 | Phases 0–1 | `done` |
 | Phases 2–3 | `code_complete` (hardware exits **not** run) |
-| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **81 passed** (2026-08-21 after overflow/desync fix) |
-| Last user work | Live First Scan on CUSA13762 failed; then asked to compress this handoff (context full) |
+| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **98 passed** (2026-08-24 PROC_WRITE two-phase) |
+| Last user work | Hex poke: watch/poll 200 then `timed out reading 4 bytes` on `POST /api/write` → 409 |
 | Git | Phase 1 on `main` (PR #1). Phase 2–3 + scan fix may be **uncommitted**. **Commit only if the user asks.** |
 
 ### Last live incident (must re-test after reconnect)
@@ -37,6 +37,28 @@ User First Scan (exact, common value) then:
 
 Helpers: `web/nitepr5_core/scan.py` — `snapshot_fits`, `snapshot_bitmap_bytes`, `drain_result_blocks`, `TOO_MANY_MATCHES`. Tests: `test_snapshot_fits_bitmap_cap`, maps-fallback GPU excluded (`count == 3`).
 
+### Freeze / cheat save (fixed 2026-08-24, restart uvicorn)
+
+Live: `POST /api/freeze/tick` and `GET /api/watch/poll` (and often `GET /api/read`) returned **400** in a tight loop. Save freezes as cheat: **“No eboot.bin map — cannot compute offsets”**.
+
+**Cause:** hex @ 4 Hz, watch @ 10 Hz, freeze @ 15 Hz all used `_hold_io(block=False)`, so any overlap was `ScanActive`. Live `maps()` name the ELF **`executable`**, not `eboot.bin` (CUSA13762 first writable was `executable` @ `0x1bc0000`). The UI matched `name === "eboot.bin"` only.
+
+**Fix in tree:** `_busy` fail-fast only; peers **wait** (no 250 ms timeout — that 400'd `POST /api/write` while hex/freeze held :744). ConnectionLost **disconnects** the client so later I/O is 409, not a 10 s hang loop. UI `onLostConnection` stops polls. `map_belongs_to_process` treats `executable` as eboot. `cheat_from_freezes` + `{from_freezes: true}`.
+
+Tests: `test_write_waits_for_peer_hold_longer_than_quarter_second`, `test_dropped_console_io_disconnects_so_later_calls_are_409`, `test_http_dropped_console_is_409_not_repeated_400`, `test_cheat_from_freezes_with_executable_maps`.
+
+**One browser tab.** Two tabs both poll :744 through one Session and will fight. Close extras, restart uvicorn, Connect again.
+
+### PROC_WRITE hang (fixed 2026-08-24, restart uvicorn)
+
+Live: `GET /api/watch/poll` 200, then `NotConnected: timed out reading 4 bytes from 192.168.4.42:744` on `POST /api/write` 409. Later read/watch also 409.
+
+**Cause:** ps5dbg 0.1.1 `protocol.proc_write` does `send_request(PROC_WRITE, 16-byte packet + payload)` so `datalen` includes the payload. ps5debug-NG reads `datalen` as the request body, ACKs, then `net_recv_all(length)` for a **second** copy of the payload. The client times out on the **second** 4-byte status. Reads still work (one status + body). PROTOCOL.md: packet only → ACK → stream payload → FINAL.
+
+**Fix in tree:** `proc_write_phased` in `web/nitepr5_core/transport.py` — `Cmd.PROC_WRITE` + `Connection.send_request` with the **16-byte packet only**, then `_sendall(payload)`. Do **not** call `PS5Debug.write()` / `protocol.proc_write` until upstream is fixed. UI `withPollsPaused` stops hex/watch/freeze around a poke so they do not interleave on :744.
+
+Tests: `test_proc_write_phased_sends_16_byte_packet_then_payload`, `test_ui_pauses_polls_during_poke`.
+
 ### What the next agent should do
 
 1. Restart uvicorn + hard-refresh the browser (`app.js` cache).
@@ -52,7 +74,7 @@ python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
 
 UI: `http://127.0.0.1:1744` → attach `eboot.bin`. Host `192.168.4.42`. ps5debug-NG v1.3.0 via elfldr **9021** (not Toolbox PS5Debug). Rest mode **does** drop 744 after sleep; that is separate from the 4-byte desync.
 
-**Hex/watch poll ≠ hung scan.** After attach, uvicorn spams `GET /api/read` ~4 Hz and `GET /api/watch/poll` ~10 Hz. `POST /api/scan/start` logs only when it **finishes**. During a hunt: `paused (scan)`; watch/freeze timers must stop.
+**Hex/watch/freeze poll ≠ hung scan.** After attach, uvicorn logs `GET /api/read` ~4 Hz, `GET /api/watch/poll` ~10 Hz, and `POST /api/freeze/tick` ~15 Hz — those must be **200**, not 400. `POST /api/scan/start` logs only when it **finishes**. During a hunt: `paused (scan)`; watch/freeze timers must stop.
 
 Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`.
 
@@ -383,7 +405,7 @@ Also touched: `session.py`, `transport.py`, `constants.py` (`SCAN_IO_TIMEOUT`, `
 
 **Exit (ARCHITECTURE, not yet):** change a value in-game from hex; freeze it; save a cheat; reload the file and toggle it. Do not mark `done` from mocks.
 
-`python -m pytest web/tests web/nitepr5_core/tests -q` → **81 passed** (includes overflow/desync tests).
+`python -m pytest web/tests web/nitepr5_core/tests -q` → see STATUS (includes PROC_WRITE two-phase + freeze-tick lock + executable-map cheat tests).
 
 ### What shipped
 
@@ -418,9 +440,9 @@ cheat_enabled_names() -> list[str]
 
 Watch `n` in `{1,2,4,8}`. Duplicate watches allowed. 65th → `WatchLimit`. 33rd freeze → `FreezeLimit`. Disconnect and retarget clear watches/freezes. Ids restart at 1.
 
-Module base for cheats = **lowest `maps().start`** whose `name` equals `cheat.process` (usually `eboot.bin`). `offset` is hex relative to that base.
+Module base for cheats = **lowest `maps().start`** whose name is `cheat.process`, its basename, **or `executable` when process is `eboot.bin`** (live CUSA13762). `offset` is hex relative to that base. `POST /api/cheat/save` with `{from_freezes: true, name, id, version}` builds GoldHEN from the freeze list (`Session.cheat_from_freezes`).
 
-`write` / `watch_poll` / `freeze_tick` / `cheat_toggle` take `_io` **non-blocking** → `ScanActive` during a hunt. Transport `write` is `PS5Debug.write(pid, address=…, data=…)`. No `PROC_WRITE_MULTI` opcode (ps5dbg 0.1.1 loops per patch).
+`write` / `watch_poll` / `freeze_tick` / `cheat_toggle` fail fast with `ScanActive` only when `_busy` (a hunt). Hex/watch/freeze/poke **wait** for each other (no 250 ms timeout — that 400'd pokes). Same-thread re-entry is allowed (scan `maps()` fallback). **ConnectionLost / socket timeout drops the client** (`transport.disconnect`); later calls are 409, not a hung 10 s read loop. Transport `write` is **`proc_write_phased`** (16-byte packet, then payload) — **not** `PS5Debug.write()` / `protocol.proc_write` (ps5dbg 0.1.1 packs payload into `datalen` and times out on the second status). No `PROC_WRITE_MULTI` opcode (ps5dbg 0.1.1 loops per patch). UI pauses hex/watch/freeze around a poke (`withPollsPaused`).
 
 ### REST (bytes = hex strings; addresses = int)
 
@@ -437,7 +459,7 @@ Module base for cheats = **lowest `maps().start`** whose `name` equals `cheat.pr
 | DELETE | `/api/freeze/{id}` | `{ok}` |
 | GET | `/api/cheats` | `{files:[basename,…]}` sorted; `web/cheats/` |
 | POST | `/api/cheat/load` | `{filename}` → `{cheat, enabled}` |
-| POST | `/api/cheat/save` | `{filename, cheat?}` → `{ok, filename}` |
+| POST | `/api/cheat/save` | `{filename, cheat?}` or `{filename, from_freezes:true, name, id, version, process?}` → `{ok, filename, cheat}` |
 | POST | `/api/cheat/toggle` | `{name, enabled}` → `{ok, name, enabled}` |
 | GET | `/api/cheat` | `{cheat: null\|dict, enabled:[str]}` |
 
@@ -456,7 +478,7 @@ Vanilla JS IIFE. Hex bytes are clickable spans → prompt → **confirm** → `P
 
 ### Traps for Phase 4+
 
-- Watch/freeze timers must keep using the same `:744` `_io` lock (fail fast `ScanActive`). Do not open a second debugger socket for freeze.
+- Watch/freeze timers must keep using the same `:744` `_io` lock (fail fast `ScanActive` **only while `_busy`**). Do not 400 when hex poll overlaps freeze tick. Do not open a second debugger socket for freeze.
 - Do not put a 10 Hz / 15 Hz loop in the plugin’s copy of the protocol until Phase 4 moves freeze on-console on purpose.
 - Keep GoldHEN JSON only. Do not write etaHEN’s cheat folder unless the user exports there.
 - After code changes: **restart uvicorn** and hard-refresh `app.js`.

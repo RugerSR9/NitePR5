@@ -5,12 +5,87 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .constants import EBOOT_NAME, WRITE_MAX
+from .constants import EBOOT_NAME, EXECUTABLE_MAP_NAME, WRITE_MAX
 from .errors import InvalidCheat
-from .types import CheatFile, CheatMod, CheatPatch
+from .types import CheatFile, CheatMod, CheatPatch, FreezeEntry, MemoryMap
 
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 _REQUIRED_ROOT = ("name", "id", "version", "process", "mods")
+
+
+def map_belongs_to_process(map_name: str, process: str = EBOOT_NAME) -> bool:
+    """True if a VM map row belongs to GoldHEN ``process`` (usually eboot.bin).
+
+    Live ps5debug-NG names the main ELF ``executable``, not ``eboot.bin``.
+    Path-like names (``/app0/eboot.bin``) match on the basename.
+    """
+    name = (map_name or "").strip()
+    proc = (process or EBOOT_NAME).strip() or EBOOT_NAME
+    if not name:
+        return False
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    if name == proc or base == proc:
+        return True
+    if proc.lower() == EBOOT_NAME and base.lower() == EXECUTABLE_MAP_NAME:
+        return True
+    return False
+
+
+def module_base_from_maps(
+    maps: list[MemoryMap],
+    process: str = EBOOT_NAME,
+) -> int | None:
+    """Lowest ``start`` among maps for ``process``, or None if none match."""
+    starts = [m.start for m in maps if map_belongs_to_process(m.name, process)]
+    return min(starts) if starts else None
+
+
+def cheat_file_from_freezes(
+    freezes: list[FreezeEntry],
+    *,
+    base: int,
+    name: str,
+    title_id: str,
+    version: str,
+    process: str = EBOOT_NAME,
+) -> CheatFile:
+    """GoldHEN file whose offsets are ``addr - module_base``.
+
+    Addresses below ``base`` are skipped (not in this module). Heap addresses
+    above ``base`` are stored as large offsets so toggle writes the same VA
+    this session (ASLR means they may not survive a relaunch).
+    """
+    if not freezes:
+        raise InvalidCheat("no freezes to save")
+    mods: list[CheatMod] = []
+    for entry in freezes:
+        if entry.addr < base:
+            continue
+        on = bytes(entry.data)
+        mods.append(
+            CheatMod(
+                name=f"Freeze {entry.addr:#x}",
+                description="",
+                type="checkbox",
+                memory=[
+                    CheatPatch(
+                        offset=format(entry.addr - base, "x"),
+                        on=on,
+                        off=bytes(len(on)),
+                    )
+                ],
+            )
+        )
+    if not mods:
+        raise InvalidCheat(f"no freezes with offsets inside {process}")
+    return CheatFile(
+        name=name or "Game",
+        id=title_id or "CUSA00000",
+        version=version or "00.00",
+        process=process or EBOOT_NAME,
+        mods=mods,
+        credits=["NitePR5"],
+    )
 
 
 def _as_str(value: object, *, field: str) -> str:

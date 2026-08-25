@@ -369,30 +369,15 @@ def test_scan_wait_drops_recv_timeout_then_restores() -> None:
     assert sock.gettimeout() == CONNECT_TIMEOUT
 
 
-def test_read_fails_fast_when_console_io_held(
+def test_read_fails_fast_when_scan_busy(
     connected: tuple[Session, MockTransport],
 ) -> None:
-    import threading
-
     session, _transport = connected
-    barrier = threading.Barrier(2)
-
-    def holder() -> None:
-        session._io.acquire()
-        try:
-            barrier.wait()
-            barrier.wait()
-        finally:
-            session._io.release()
-
-    thread = threading.Thread(target=holder)
-    thread.start()
-    barrier.wait()
+    session._begin_busy()
     try:
         with pytest.raises(ScanActive):
             session.read(MockTransport.EBOOT_PID, MockTransport.RAM_BASE, 16)
     finally:
-        barrier.wait()
-        thread.join()
+        session._end_busy()
     peephole = session.read(MockTransport.EBOOT_PID, MockTransport.RAM_BASE, 16)
     assert len(peephole) == 16

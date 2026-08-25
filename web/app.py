@@ -61,6 +61,7 @@ from nitepr5_core import (
     resolve_host,
 )
 from nitepr5_core.cheat import cheat_to_dict, parse_cheat_dict
+from nitepr5_core.constants import EBOOT_NAME
 
 STATIC = Path(__file__).resolve().parent / "static"
 CHEATS_DIR = Path(__file__).resolve().parent / "cheats"
@@ -133,6 +134,11 @@ class CheatLoadBody(BaseModel):
 class CheatSaveBody(BaseModel):
     filename: str
     cheat: dict | None = None
+    from_freezes: bool = False
+    name: str = ""
+    id: str = ""
+    version: str = ""
+    process: str = EBOOT_NAME
 
 
 class CheatToggleBody(BaseModel):
@@ -266,7 +272,11 @@ async def nitepr5_error_handler(_request: Request, exc: NitePR5Error) -> JSONRes
         status = 400
     else:
         status = 500
-    return JSONResponse(status_code=status, content={"detail": str(exc)})
+    logging.getLogger("nitepr5").warning("%s: %s", type(exc).__name__, exc)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": str(exc) or type(exc).__name__, "error": type(exc).__name__},
+    )
 
 
 @app.get("/")
@@ -447,10 +457,23 @@ def api_cheat_load(body: CheatLoadBody) -> dict:
 @app.post("/api/cheat/save")
 def api_cheat_save(body: CheatSaveBody) -> dict:
     dest = _cheat_path(body.filename)
-    parsed = parse_cheat_dict(body.cheat) if body.cheat is not None else None
+    if body.from_freezes:
+        parsed = SESSION.cheat_from_freezes(
+            name=body.name,
+            title_id=body.id,
+            version=body.version,
+            process=body.process or EBOOT_NAME,
+        )
+    else:
+        parsed = parse_cheat_dict(body.cheat) if body.cheat is not None else None
     CHEATS_DIR.mkdir(parents=True, exist_ok=True)
     SESSION.cheat_save(dest, parsed)
-    return {"ok": True, "filename": dest.name}
+    loaded = SESSION.loaded_cheat()
+    return {
+        "ok": True,
+        "filename": dest.name,
+        "cheat": cheat_to_dict(loaded) if loaded is not None else None,
+    }
 
 
 @app.post("/api/cheat/toggle")

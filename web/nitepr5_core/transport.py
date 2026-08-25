@@ -12,6 +12,7 @@ import struct
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from collections.abc import Iterator
+from typing import NoReturn
 
 from .constants import (
     CONNECT_TIMEOUT,
@@ -192,6 +193,32 @@ class Transport(ABC):
         ...
 
 
+_PROC_WRITE_PACKET = 16  # struct cmd_proc_write_packet: u32 pid, u64 addr, u32 length
+
+
+def proc_write_phased(conn: object, pid: int, address: int, data: bytes) -> None:
+    """CMD_PROC_WRITE two-phase (ps5debug-NG PROTOCOL.md).
+
+    Request body is **only** the 16-byte packet. After the ACK status the
+    client streams ``length`` payload bytes; then a final status.
+
+    ps5dbg 0.1.1's ``protocol.proc_write`` concatenates the payload into
+    ``send_request``, so the server reads it as ``packet->data``, ACKs, and
+    blocks waiting for ``length`` more bytes. The client then times out on
+    the second 4-byte status (live: ``POST /api/write`` 409).
+    """
+    from ps5dbg.constants import Cmd
+    from ps5dbg.wire import expect_success
+
+    payload = bytes(data)
+    packet = struct.pack("<IQI", pid, address, len(payload))
+    conn.send_request(Cmd.PROC_WRITE, packet)
+    expect_success(conn, context="CMD_PROC_WRITE (ack)")
+    if payload:
+        conn._sendall(payload)
+    expect_success(conn, context="CMD_PROC_WRITE (final)")
+
+
 class Ps5dbgTransport(Transport):
     """Wraps ``ps5dbg.PS5Debug``. Keyword for memory read is ``address=``."""
 
@@ -303,16 +330,23 @@ class Ps5dbgTransport(Transport):
             except OSError:
                 pass
 
+    def _lost(self, exc: BaseException) -> NoReturn:
+        """Drop the dead :744 client. Leaving it connected hangs every later I/O."""
+        self.disconnect()
+        raise NotConnected(
+            f"{exc}. Reconnect — a failed scan can desync TCP 744. "
+            "Rest mode also drops this socket."
+        ) from exc
+
     def _call(self, fn, *args, **kwargs):
         from ps5dbg.errors import ConnectionLost, PS5DbgError
 
         try:
             return fn(*args, **kwargs)
         except ConnectionLost as exc:
-            raise NotConnected(
-                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
-                "Rest mode also drops this socket."
-            ) from exc
+            self._lost(exc)
+        except (TimeoutError, OSError) as exc:
+            self._lost(exc)
         except PS5DbgError as exc:
             from .errors import NitePR5Error
 
@@ -370,9 +404,9 @@ class Ps5dbgTransport(Transport):
         if len(data) > WRITE_MAX:
             raise WriteTooLarge(len(data))
         ps5 = self._require()
-        # Same trap as read: keyword is address=, not addr=.
-        # Do not reimplement PROC_WRITE_MULTI; ps5dbg 0.1.1 loops proc_write.
-        self._call(ps5.write, pid, address=address, data=bytes(data))
+        # Do not call ps5.write — ps5dbg 0.1.1 packs payload into datalen and
+        # deadlocks on the second status word (PROTOCOL.md two-phase write).
+        self._call(proc_write_phased, ps5.connection, pid, address, bytes(data))
 
     def scan_caps(self) -> tuple[int, int, int] | None:
         import ps5dbg.turboscan as ts
@@ -385,10 +419,7 @@ class Ps5dbgTransport(Transport):
         except BadStatus:
             return None
         except ConnectionLost as exc:
-            raise NotConnected(
-                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
-                "Rest mode also drops this socket."
-            ) from exc
+            self._lost(exc)
         except PS5DbgError as exc:
             from .errors import NitePR5Error
 
@@ -414,7 +445,9 @@ class Ps5dbgTransport(Transport):
                 raw = ts.turboscan_regions(
                     ps5.connection, pid, max_regions=0, probe_bytes=probe_bytes
                 )
-        except (BadStatus, PS5DbgError, ConnectionLost, OSError):
+        except ConnectionLost as exc:
+            self._lost(exc)
+        except (BadStatus, PS5DbgError, OSError):
             return None
         return [
             ScanRegion(start=r.start, end=r.end, prot=r.prot, uncached=r.uncached)
@@ -508,10 +541,7 @@ class Ps5dbgTransport(Transport):
                 pass
             raise
         except ConnectionLost as exc:
-            raise NotConnected(
-                f"{exc}. Reconnect — a failed scan can desync TCP 744. "
-                "Rest mode also drops this socket."
-            ) from exc
+            self._lost(exc)
         except PS5DbgError as exc:
             from .errors import NitePR5Error
 
@@ -572,7 +602,9 @@ class Ps5dbgTransport(Transport):
         try:
             with self.scan_wait():
                 ts.turboscan_end(self._scan_conn())
-        except (ConnectionLost, PS5DbgError, OSError, NotConnected):
+        except ConnectionLost:
+            self.disconnect()
+        except (PS5DbgError, OSError, NotConnected):
             pass
         self._turbo_open = False
 
@@ -697,6 +729,7 @@ class MockTransport(Transport):
         self.last_use_aliasing = False
         self.last_rescan_aliasing = False
         self.write_calls: list[tuple[int, int, bytes]] = []
+        self.drop_io = False
         self._scan_authed = False
         self._turbo_open = False
         self._rescan_aliasing = False
@@ -824,8 +857,17 @@ class MockTransport(Transport):
         self.maps_fetch_count += 1
         return list(self._maps.get(pid, ()))
 
+    def _maybe_drop(self) -> None:
+        if self.drop_io:
+            self.disconnect()
+            raise NotConnected(
+                "mock drop_io. Reconnect — a failed scan can desync TCP 744. "
+                "Rest mode also drops this socket."
+            )
+
     def read(self, pid: int, address: int, length: int) -> bytes:
         self._require()
+        self._maybe_drop()
         if length > READ_MAX:
             raise ReadTooLarge(length)
         if not isinstance(length, int) or isinstance(length, bool) or length <= 0:
@@ -839,6 +881,7 @@ class MockTransport(Transport):
 
     def write(self, pid: int, address: int, data: bytes) -> None:
         self._require()
+        self._maybe_drop()
         if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
             raise InvalidWriteSize(0 if isinstance(data, (bytes, bytearray)) else data)
         if len(data) > WRITE_MAX:

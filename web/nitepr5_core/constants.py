@@ -77,3 +77,6 @@ PROT_WRITE = 2
 PROT_EXEC = 4
 
 EBOOT_NAME = "eboot.bin"
+# ps5debug-NG names the main ELF mappings "executable", not "eboot.bin"
+# (CUSA13762 live: first writable map name is executable @ 0x1bc0000).
+EXECUTABLE_MAP_NAME = "executable"

@@ -14,8 +14,10 @@ Scan policy (ARCHITECTURE §5.3):
   does not GET (count-first UI).
 
 Watch / freeze / write take ``_hold_io(block=False)`` so they fail fast with
-``ScanActive`` while a hunt owns the socket. No second ``:744`` connection.
-UI owns 10 Hz / 15 Hz timers; this layer has no background threads.
+``ScanActive`` while a hunt (``_busy``) owns the socket. They wait for a
+short hex/watch/freeze peer — not 400 on every overlapping tick. No second
+``:744`` connection. UI owns 10 Hz / 15 Hz timers; this layer has no
+background threads.
 """
 
 from __future__ import annotations
@@ -27,10 +29,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cheat import load_cheat_file, save_cheat_file
+from .cheat import (
+    cheat_file_from_freezes,
+    load_cheat_file,
+    module_base_from_maps,
+    save_cheat_file,
+)
 from .constants import (
     CONNECT_TIMEOUT,
     EBOOT_NAME,
+    EXECUTABLE_MAP_NAME,
     FREEZE_MAX,
     FREEZE_SIZE_MAX,
     FREEZE_SIZE_MIN,
@@ -136,6 +144,9 @@ class Session:
         self._scan: _ScanState | None = None
         self._busy = False
         self._io = threading.RLock()
+        self._busy_gate = threading.Lock()
+        self._io_owner: int | None = None
+        self._io_depth = 0
         self._watches: dict[int, WatchEntry] = {}
         self._freezes: dict[int, FreezeEntry] = {}
         self._next_watch_id = 1
@@ -175,22 +186,39 @@ class Session:
         return self._target_pid
 
     def _begin_busy(self) -> None:
-        if self._busy:
-            raise ScanActive("scan operation already in flight")
-        self._busy = True
+        with self._busy_gate:
+            if self._busy:
+                raise ScanActive("scan operation already in flight")
+            self._busy = True
 
     def _end_busy(self) -> None:
-        self._busy = False
+        with self._busy_gate:
+            self._busy = False
 
     @contextmanager
     def _hold_io(self, *, block: bool = True) -> Iterator[None]:
-        """Serialize all TCP 744 use. Peephole reads fail fast during a scan."""
-        got = self._io.acquire(blocking=block)
-        if not got:
+        """Serialize all TCP 744 use.
+
+        ``block=False`` fails fast only when another thread's scan owns the
+        socket (``_busy``). The scan thread may re-enter (maps fallback).
+        Hex / watch / freeze / poke wait for each other — a short timeout here
+        turned live pokes into 400s whenever a peephole read was in flight.
+        """
+        me = threading.get_ident()
+        already = self._io_owner == me
+        if not block and self._busy and not already:
             raise ScanActive("scan in flight; peephole paused")
+        self._io.acquire(blocking=True)
+        self._io_owner = me
+        self._io_depth += 1
         try:
+            if not block and self._busy and not already:
+                raise ScanActive("scan in flight; peephole paused")
             yield
         finally:
+            self._io_depth -= 1
+            if self._io_depth == 0:
+                self._io_owner = None
             self._io.release()
 
     def discover(self, *, timeout: float = 2.0) -> list[str]:
@@ -299,8 +327,9 @@ class Session:
     def write(self, pid: int | None, addr: int, data: bytes) -> None:
         """Peephole poke. Default pid is the attached target. Rejects empty / >4 KiB.
 
-        Confirm dialogs are a UI concern. Takes the I/O lock non-blocking so a
-        hunt fails this call with ``ScanActive`` instead of interleaving :744.
+        Confirm dialogs are a UI concern. Fail-fast if a hunt owns :744;
+        otherwise wait for a short hex/watch/freeze peer so a poke is not
+        refused as ScanActive.
         """
         if not isinstance(data, (bytes, bytearray)):
             raise InvalidWriteSize(data)
@@ -427,10 +456,34 @@ class Session:
 
     def _module_base(self, pid: int, process: str) -> int:
         rows = self.maps(pid)
-        starts = [m.start for m in rows if m.name == process]
-        if not starts:
-            raise InvalidCheat(f"no maps named {process!r} for pid {pid}")
-        return min(starts)
+        base = module_base_from_maps(rows, process)
+        if base is None:
+            raise InvalidCheat(
+                f"no maps named {process!r} (or {EXECUTABLE_MAP_NAME!r}) for pid {pid}"
+            )
+        return base
+
+    def cheat_from_freezes(
+        self,
+        *,
+        name: str,
+        title_id: str,
+        version: str,
+        process: str = EBOOT_NAME,
+    ) -> CheatFile:
+        """Build a GoldHEN file from the freeze list (module-relative offsets)."""
+        self._require_connected()
+        pid = self._resolve_pid(None)
+        proc = (process or EBOOT_NAME).strip() or EBOOT_NAME
+        base = self._module_base(pid, proc)
+        return cheat_file_from_freezes(
+            list(self._freezes.values()),
+            base=base,
+            name=name,
+            title_id=title_id,
+            version=version,
+            process=proc,
+        )
 
     def cheat_load(self, path: str | Path) -> CheatFile:
         cheat = load_cheat_file(path)
@@ -443,6 +496,9 @@ class Session:
         if chosen is None:
             raise NoCheat("no cheat file loaded")
         save_cheat_file(path, chosen)
+        if cheat is not None:
+            self._cheat = chosen
+            self._cheat_enabled.clear()
 
     def cheat_toggle(self, name: str, enabled: bool) -> None:
         """Write GoldHEN on/off bytes at module_base + offset. Uses ``write()``."""
@@ -569,10 +625,12 @@ class Session:
             ct = parse_compare(compare)
             require_first_compare(ct)
             parsed_value = parse_u32_value(value, required=True)
-        with self._hold_io():
-            self._end_scan(silent=True)
-            self._begin_busy()
-            try:
+        # Set _busy before taking :744 so hex/watch/freeze fail fast instead of
+        # waiting behind a hunt that can run for minutes.
+        self._begin_busy()
+        try:
+            with self._hold_io():
+                self._end_scan(silent=True)
                 with self._transport.scan_wait():
                     caps = self._transport.scan_caps()
                     self._transport.scan_authenticate()
@@ -656,8 +714,8 @@ class Session:
                         iterative_all=iterative_all,
                     )
                     return count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_next(self, *, compare: str, value: int | None = None) -> int:
         """Narrow the active scan. Returns the new survivor count."""
@@ -667,9 +725,9 @@ class Session:
         ct = parse_compare(compare)
         require_next_compare(ct)
         parsed_value = parse_u32_value(value, required=(ct == SCAN_COMPARE_EXACT))
-        with self._hold_io():
-            self._begin_busy()
-            try:
+        self._begin_busy()
+        try:
+            with self._hold_io():
                 with self._transport.scan_wait():
                     self._stash_if_small()
                     self._scan.undo_stack.append((self._scan.count, self._scan.hits))
@@ -697,17 +755,17 @@ class Session:
                     self._scan.hits = None
                     self._scan.count = count
                     return count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_undo(self) -> int | None:
         """Undo one generation. None means the scan ended (first-scan undo)."""
         self._require_connected()
         if self._scan is None:
             raise NoScan("no active scan")
-        with self._hold_io():
-            self._begin_busy()
-            try:
+        self._begin_busy()
+        try:
+            with self._hold_io():
                 with self._transport.scan_wait():
                     if not self._scan.undo_stack:
                         self._end_scan(silent=False)
@@ -727,8 +785,8 @@ class Session:
                             pass
                         self._scan.engine = "local"
                     return prev_count
-            finally:
-                self._end_busy()
+        finally:
+            self._end_busy()
 
     def scan_count(self) -> int:
         """Current survivor count. Does not fetch rows."""

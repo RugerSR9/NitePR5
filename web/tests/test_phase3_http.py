@@ -27,6 +27,7 @@ from nitepr5_core import (
     WRITE_MAX,
     InvalidCheat,
     InvalidWriteSize,
+    MemoryMap,
     MockTransport,
     Session,
     WriteTooLarge,
@@ -347,6 +348,25 @@ def test_http_freeze_tick_writes(
     assert restored.json()["data"].lower() == frozen
 
 
+def test_http_dropped_console_is_409_not_repeated_400(
+    client_and_session: tuple[object, Session, MockTransport],
+) -> None:
+    client, _session, transport = client_and_session
+    _require_http(client.app, "/api/read", "/api/write")
+    transport.drop_io = True
+    lost = client.get(
+        "/api/read",
+        params={"addr": MockTransport.WRITABLE_EBOOT_ADDR, "n": 4},
+    )
+    assert lost.status_code == 409, lost.text
+    assert lost.json().get("error") == "NotConnected"
+    again = client.post(
+        "/api/write",
+        json={"addr": MockTransport.WRITABLE_EBOOT_ADDR, "data": "01000000"},
+    )
+    assert again.status_code == 409, again.text
+
+
 def test_http_cheat_load_save_toggle(
     client_and_session: tuple[object, Session, MockTransport],
 ) -> None:
@@ -452,3 +472,134 @@ def test_ui_write_confirm_and_count_first() -> None:
     if "/api/scan/results" in text:
         assert "RESULTS_MAX" in text or "256" in text
         assert "count" in text.lower()
+
+
+def test_ui_save_freezes_uses_from_freezes_and_executable_alias() -> None:
+    if not _JS.is_file():
+        pytest.skip("web/static/app.js not present")
+    text = _JS.read_text(encoding="utf-8")
+    assert "from_freezes" in text
+    assert "mapBelongsToEboot" in text
+    assert '"executable"' in text or "'executable'" in text
+    assert "No eboot.bin map — cannot compute offsets" not in text
+
+
+def test_ui_pauses_polls_during_poke() -> None:
+    if not _JS.is_file():
+        pytest.skip("web/static/app.js not present")
+    text = _JS.read_text(encoding="utf-8")
+    assert "withPollsPaused" in text
+    assert "/api/write" in text
+
+
+def test_ui_stops_polls_on_lost_connection() -> None:
+    if not _JS.is_file():
+        pytest.skip("web/static/app.js not present")
+    text = _JS.read_text(encoding="utf-8")
+    assert "isLostConnectionError" in text
+    assert "onLostConnection" in text
+    assert "Connect again" in text
+
+
+def test_http_save_freezes_as_cheat_with_executable_maps(
+    client_and_session: tuple[object, Session, MockTransport],
+) -> None:
+    client, session, transport = client_and_session
+    _require_http(client.app, "/api/freeze", "/api/cheat/save", "/api/cheat/toggle")
+
+    renamed = []
+    for row in transport._maps[MockTransport.EBOOT_PID]:
+        name = "executable" if row.name == "eboot.bin" else row.name
+        renamed.append(
+            MemoryMap(
+                name=name,
+                start=row.start,
+                end=row.end,
+                offset=row.offset,
+                prot=row.prot,
+            )
+        )
+    transport._maps[MockTransport.EBOOT_PID] = renamed
+    session._maps_cache.clear()
+
+    frozen = "02000000"
+    added = client.post(
+        "/api/freeze",
+        json={"addr": MockTransport.WRITABLE_EBOOT_ADDR, "data": frozen},
+    )
+    assert added.status_code == 200, added.text
+
+    filename = "test_cusa13762_from_freezes.json"
+    cheat_path = _CHEATS_DIR / filename
+    try:
+        saved = client.post(
+            "/api/cheat/save",
+            json={
+                "filename": filename,
+                "from_freezes": True,
+                "name": "The Golf Club 2019",
+                "id": "CUSA13762",
+                "version": "01.02",
+                "process": "eboot.bin",
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        body = saved.json()
+        assert body["ok"] is True
+        assert body["filename"] == filename
+        cheat = body["cheat"]
+        assert cheat["id"] == "CUSA13762"
+        assert cheat["process"] == "eboot.bin"
+        offset = MockTransport.WRITABLE_EBOOT_ADDR - MockTransport.RAM_BASE
+        assert cheat["mods"][0]["memory"][0]["offset"] == format(offset, "x")
+        assert cheat["mods"][0]["memory"][0]["on"] == frozen
+        assert cheat["mods"][0]["memory"][0]["off"] == "00000000"
+
+        transport.poke_u32(MockTransport.WRITABLE_EBOOT_ADDR, 99)
+        toggled = client.post(
+            "/api/cheat/toggle",
+            json={"name": cheat["mods"][0]["name"], "enabled": True},
+        )
+        assert toggled.status_code == 200, toggled.text
+        restored = client.get(
+            "/api/read",
+            params={"addr": MockTransport.WRITABLE_EBOOT_ADDR, "n": 4},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["data"].lower() == frozen
+    finally:
+        cheat_path.unlink(missing_ok=True)
+
+
+def test_http_save_freezes_400_without_eboot_map(
+    client_and_session: tuple[object, Session, MockTransport],
+) -> None:
+    client, session, transport = client_and_session
+    _require_http(client.app, "/api/freeze", "/api/cheat/save")
+    transport._maps[MockTransport.EBOOT_PID] = [
+        MemoryMap(
+            name="heap",
+            start=MockTransport.HEAP_A,
+            end=MockTransport.HEAP_END,
+            offset=0,
+            prot=3,
+        )
+    ]
+    session._maps_cache.clear()
+    added = client.post(
+        "/api/freeze",
+        json={"addr": MockTransport.HEAP_A, "data": "01000000"},
+    )
+    assert added.status_code == 200, added.text
+    refused = client.post(
+        "/api/cheat/save",
+        json={
+            "filename": "test_no_eboot.json",
+            "from_freezes": True,
+            "name": "Game",
+            "id": "CUSA00000",
+            "version": "00.00",
+        },
+    )
+    assert refused.status_code == 400, refused.text
+    assert "executable" in refused.json()["detail"].lower() or "eboot" in refused.json()["detail"].lower()

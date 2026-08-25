@@ -138,6 +138,30 @@
     );
   }
 
+  function isLostConnectionError(err) {
+    const m = String(err && err.message ? err.message : err).toLowerCase();
+    return (
+      m.indexOf("not connected") !== -1 ||
+      m.indexOf("reconnect") !== -1 ||
+      m.indexOf("tcp 744") !== -1 ||
+      m.indexOf("http 409") !== -1
+    );
+  }
+
+  function onLostConnection(err) {
+    stopHexPoll();
+    stopWatchPoll();
+    stopFreezeTick();
+    state.connected = false;
+    state.attachedPid = null;
+    resetTargetUi();
+    setStatus(
+      el.connectStatus,
+      String(err && err.message ? err.message : err) + " — Connect again.",
+      true
+    );
+  }
+
   function preferPid(processes, fg) {
     const eboot = processes.find(function (p) { return p.name === "eboot.bin"; });
     if (eboot) return eboot.pid;
@@ -155,10 +179,17 @@
     }) || maps[0] || null;
   }
 
+  function mapBelongsToEboot(name) {
+    const n = String(name || "").trim();
+    if (!n) return false;
+    const base = n.split(/[/\\]/).pop();
+    return n === "eboot.bin" || base === "eboot.bin" || String(base).toLowerCase() === "executable";
+  }
+
   function ebootBase(maps) {
     let start = null;
     (maps || []).forEach(function (m) {
-      if (m.name === "eboot.bin") {
+      if (mapBelongsToEboot(m.name)) {
         if (start == null || m.start < start) start = m.start;
       }
     });
@@ -579,6 +610,10 @@
       if (state.attachedPid !== pid) {
         return;
       }
+      if (isLostConnectionError(err)) {
+        onLostConnection(err);
+        return;
+      }
       if (isScanActiveError(err)) {
         return;
       }
@@ -831,6 +866,10 @@
       applyWatchValues(body.values || []);
       setStatus(el.watchStatus, "watch ~10 Hz");
     } catch (err) {
+      if (isLostConnectionError(err)) {
+        onLostConnection(err);
+        return;
+      }
       if (isScanActiveError(err)) {
         return;
       }
@@ -921,6 +960,10 @@
     try {
       await apiPost("/api/freeze/tick", {});
     } catch (err) {
+      if (isLostConnectionError(err)) {
+        onLostConnection(err);
+        return;
+      }
       if (isScanActiveError(err)) {
         return;
       }
@@ -996,22 +1039,48 @@
     addFreeze(addr, data);
   }
 
+  async function withPollsPaused(work) {
+    stopHexPoll();
+    stopWatchPoll();
+    stopFreezeTick();
+    let i = 0;
+    while (i < 40 && (state.inflight || state.watchInflight || state.freezeInflight)) {
+      await new Promise(function (resolve) { setTimeout(resolve, 25); });
+      i += 1;
+    }
+    try {
+      return await work();
+    } finally {
+      if (!state.paused && !document.hidden && !state.scanBusy && state.attachedPid != null) {
+        startHexPoll();
+        startWatchPoll();
+        startFreezeTick();
+      }
+    }
+  }
+
   async function writeBytes(addr, newHex) {
     const n = newHex.length / 2;
     const oldHex = peekHexAt(addr, n) || "(unknown)";
     const msg = hexAddr(addr) + "\n" + oldHex + " → " + newHex;
     if (!window.confirm(msg)) return false;
-    try {
-      await apiPost("/api/write", { addr: addr, data: newHex });
-      setStatus(el.hexStatus, "wrote " + n + " B @ " + hexAddr(addr));
-      if (!state.paused && !document.hidden && !state.scanBusy) {
-        tickHex();
+    return withPollsPaused(async function () {
+      try {
+        await apiPost("/api/write", { addr: addr, data: newHex });
+        setStatus(el.hexStatus, "wrote " + n + " B @ " + hexAddr(addr));
+        if (!state.paused && !document.hidden && !state.scanBusy) {
+          tickHex();
+        }
+        return true;
+      } catch (err) {
+        if (isLostConnectionError(err)) {
+          onLostConnection(err);
+          return false;
+        }
+        setStatus(el.hexStatus, String(err.message || err), true);
+        return false;
       }
-      return true;
-    } catch (err) {
-      setStatus(el.hexStatus, String(err.message || err), true);
-      return false;
-    }
+    });
   }
 
   function onHexClick(ev) {
@@ -1165,55 +1234,29 @@
     }
   }
 
-  function buildFreezeCheat() {
-    const base = ebootBase(state.maps);
-    if (base == null) {
-      setStatus(el.cheatStatus, "No eboot.bin map — cannot compute offsets", true);
-      return null;
-    }
-    const fg = state.foreground || {};
-    const id = ((el.cheatId && el.cheatId.value) || fg.titleid || "CUSA00000").trim();
-    const version = ((el.cheatVersion && el.cheatVersion.value) || fg.app_ver || "00.00").trim();
-    const name = ((el.cheatGameName && el.cheatGameName.value) || fg.name || "Game").trim();
-    const mods = [];
-    (state.freezes || []).forEach(function (f) {
-      const off = f.addr - base;
-      if (off < 0) return;
-      const onHex = String(f.data || "").toLowerCase();
-      const offHex = (new Array(onHex.length + 1).join("0")).slice(0, onHex.length) || "00";
-      mods.push({
-        name: "Freeze " + hexAddr(f.addr),
-        description: "",
-        type: "checkbox",
-        memory: [{ offset: off.toString(16), on: onHex, off: offHex }],
-      });
-    });
-    if (!mods.length) {
-      setStatus(el.cheatStatus, "No freezes with offsets inside eboot.bin", true);
-      return null;
-    }
-    return {
-      name: name || "Game",
-      id: id || "CUSA00000",
-      version: version || "00.00",
-      process: "eboot.bin",
-      mods: mods,
-      credits: ["NitePR5"],
-    };
-  }
-
   async function onCheatSaveFreezes() {
     const filename = safeCheatFilename(el.cheatFilename && el.cheatFilename.value);
     if (!filename) {
       setStatus(el.cheatStatus, "Enter a filename (no path, not etaHEN)", true);
       return;
     }
-    const cheat = buildFreezeCheat();
-    if (!cheat) return;
+    const fg = state.foreground || {};
+    const id = ((el.cheatId && el.cheatId.value) || fg.titleid || "CUSA00000").trim();
+    const version = ((el.cheatVersion && el.cheatVersion.value) || fg.app_ver || "00.00").trim();
+    const name = ((el.cheatGameName && el.cheatGameName.value) || fg.name || "Game").trim();
     try {
-      const body = await apiPost("/api/cheat/save", { filename: filename, cheat: cheat });
-      state.cheatLoaded = true;
-      renderCheatMods(cheat, []);
+      const body = await apiPost("/api/cheat/save", {
+        filename: filename,
+        from_freezes: true,
+        name: name || "Game",
+        id: id || "CUSA00000",
+        version: version || "00.00",
+        process: "eboot.bin",
+      });
+      if (body.cheat) {
+        state.cheatLoaded = true;
+        renderCheatMods(body.cheat, []);
+      }
       setStatus(el.cheatStatus, "Saved " + (body.filename || filename));
       if (el.cheatFile) {
         await refreshCheatFiles();
