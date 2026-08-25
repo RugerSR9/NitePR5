@@ -1,4 +1,6 @@
 ps5dbg>=0.1.1
 fastapi
 uvicorn
+langsmith
+python-dotenv
 

@@ -122,6 +122,18 @@ class InvalidScanCompare(NitePR5Error):
     """Unknown compare name, or a compare that is not valid for this step."""
 
 
+class InvalidAddress(NitePR5Error):
+    """Memory address is not a u64 (negative, too large, or not int).
+
+    PS5Debug PROC_READ/WRITE packs address as little-endian ``Q``. A JS
+    bitwise align of a 64-bit VA used to send negative query params.
+    """
+
+    def __init__(self, addr: object) -> None:
+        self.addr = addr
+        super().__init__(f"addr must be a u64, got {addr!r}")
+
+
 class InvalidWriteSize(NitePR5Error):
     """write() data is empty or not bytes."""
 

@@ -55,6 +55,8 @@ python -m uvicorn app:app --app-dir web --host 127.0.0.1 --port 1744
 
 Exit test (Phase 1, done): open a PS4-on-PS5 title (`CUSA*`), Connect, attach `eboot.bin`, confirm live bytes.
 
+Optional [LangSmith](https://smith.langchain.com/) tracing: set `TRACE_TO_LANGSMITH=true` and `LANGSMITH_API_KEY` (or `LANGCHAIN_API_KEY`) in `.env`. Traces land in project `nitepr5` (`LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT`). Hex peepholes, watch polls, and freeze ticks are not traced, and RAM bytes are never sent.
+
 Phase 3 adds poke (confirm), watch ≤64 @ ~10 Hz, freeze ≤32 @ 15 Hz, and GoldHEN files in `web/cheats/`. Writes never go to `/data/etaHEN/cheats/`. `python -m pytest web/tests web/nitepr5_core/tests -q` covers the mock path.
 
 ## Phases (short)

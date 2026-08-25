@@ -482,6 +482,7 @@ Vanilla JS IIFE. Hex canvas fills the viewport (ImHex-style chrome). Click selec
 - Do not put a 10 Hz / 15 Hz loop in the plugin’s copy of the protocol until Phase 4 moves freeze on-console on purpose.
 - Keep GoldHEN JSON only. Do not write etaHEN’s cheat folder unless the user exports there.
 - After code changes: **restart uvicorn** and hard-refresh `app.js`.
+- **Never bitwise-AND 64-bit VAs in JS.** `addr & ~0xf` / `n >>> 0` ToInt32-truncate heap (~`0x2_0000_0000+`) and produced `GET /api/read?addr=-389259952` → `struct.error` on `Q`. Align with modulo (`alignPeephole`); `parseGoto` uses `asAddr`. Session rejects addr not in `0..2**64-1` as `InvalidAddress` 400.
 - `plugin/` and `overlay/` still forbidden until those phases.
 
 ### Phase 3 file tree (added on top of Phase 2)

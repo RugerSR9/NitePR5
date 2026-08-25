@@ -60,6 +60,7 @@ from .constants import (
 from .errors import (
     ConnectFailed,
     FreezeLimit,
+    InvalidAddress,
     InvalidCheat,
     InvalidFreezeSize,
     InvalidReadSize,
@@ -67,7 +68,6 @@ from .errors import (
     InvalidScanRegions,
     InvalidWatchSize,
     InvalidWriteSize,
-    NitePR5Error,
     NoCheat,
     NoFreeze,
     NoMod,
@@ -131,6 +131,16 @@ class _ScanState:
     hits: list[ScanHit] | None = None
     iterative_all: list[ScanHit] | None = None
     undo_stack: list[tuple[int, list[ScanHit] | None]] = field(default_factory=list)
+
+
+_U64_MAX = (1 << 64) - 1
+
+
+def _require_addr(addr: object) -> int:
+    """PS5Debug PROC_READ/WRITE packs address as little-endian ``Q`` (u64)."""
+    if not isinstance(addr, int) or isinstance(addr, bool) or addr < 0 or addr > _U64_MAX:
+        raise InvalidAddress(addr)
+    return addr
 
 
 class Session:
@@ -319,8 +329,7 @@ class Session:
             raise ReadTooLarge(n)
         self._require_connected()
         pid = self._resolve_pid(pid)
-        if not isinstance(addr, int) or isinstance(addr, bool):
-            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        addr = _require_addr(addr)
         with self._hold_io(block=False):
             return self._transport.read(pid, address=addr, length=n)
 
@@ -340,8 +349,7 @@ class Session:
             raise WriteTooLarge(n)
         self._require_connected()
         pid = self._resolve_pid(pid)
-        if not isinstance(addr, int) or isinstance(addr, bool):
-            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        addr = _require_addr(addr)
         with self._hold_io(block=False):
             self._transport.write(pid, address=addr, data=bytes(data))
 
@@ -377,8 +385,7 @@ class Session:
         """Pin an address. Cap 64; the 65th raises ``WatchLimit`` (fail closed)."""
         if not isinstance(n, int) or isinstance(n, bool) or n not in WATCH_SIZES:
             raise InvalidWatchSize(n)
-        if not isinstance(addr, int) or isinstance(addr, bool):
-            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        addr = _require_addr(addr)
         self._require_connected()
         pid = self._resolve_pid(pid)
         if len(self._watches) >= WATCH_MAX:
@@ -425,8 +432,7 @@ class Session:
         n = len(data)
         if n < FREEZE_SIZE_MIN or n > FREEZE_SIZE_MAX:
             raise InvalidFreezeSize(n)
-        if not isinstance(addr, int) or isinstance(addr, bool):
-            raise NitePR5Error(f"addr must be int, got {addr!r}")
+        addr = _require_addr(addr)
         self._require_connected()
         pid = self._resolve_pid(pid)
         if len(self._freezes) >= FREEZE_MAX:

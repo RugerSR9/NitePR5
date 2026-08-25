@@ -136,8 +136,24 @@
     node.classList.toggle("err", !!isErr);
   }
 
+  function asAddr(n) {
+    const v = typeof n === "number" ? n : Number(n);
+    if (!Number.isFinite(v) || v < 0 || !Number.isSafeInteger(v)) return null;
+    return v;
+  }
+
+  function alignPeephole(addr) {
+    const v = asAddr(addr);
+    if (v == null) return 0;
+    // Do not use bitwise AND: JS ToInt32 truncates 64-bit PS5 VAs
+    // (heap ~0x2_0000_0000+) and can send a negative /api/read addr.
+    return v - (v % ROW_BYTES);
+  }
+
   function hexAddr(n) {
-    return "0x" + n.toString(16).toUpperCase().padStart(10, "0");
+    const v = asAddr(n);
+    if (v == null) return "0x????????";
+    return "0x" + v.toString(16).toUpperCase().padStart(10, "0");
   }
 
   async function api(path, opts) {
@@ -297,7 +313,7 @@
     });
     if (el.gotoAddr) el.gotoAddr.disabled = !attached;
     if (el.btnGoto) el.btnGoto.disabled = !attached;
-    if (el.hexEmpty) el.hexEmpty.hidden = !!attached;
+    if (el.hexEmpty) el.hexEmpty.hidden = !!state.connected;
     if (el.hexWrap) el.hexWrap.hidden = !attached;
     if (el.scanBadge) {
       if (state.scanCount != null) {
@@ -376,8 +392,11 @@
 
   function jumpToAddr(addr, selected) {
     if (state.attachedPid == null) return;
-    state.peepholeAddr = addr & ~0xf;
-    state.selectedAddr = selected != null ? selected : addr;
+    const target = asAddr(addr);
+    if (target == null) return;
+    state.peepholeAddr = alignPeephole(target);
+    const sel = selected != null ? asAddr(selected) : target;
+    state.selectedAddr = sel != null ? sel : target;
     updateHexSel();
     updateInspector();
     if (!state.paused && !document.hidden && !state.scanBusy) {
@@ -587,16 +606,13 @@
     const s = String(raw || "").trim();
     if (!s) return null;
     if (/^0x[0-9a-fA-F]+$/i.test(s)) {
-      const n = parseInt(s, 16);
-      return Number.isFinite(n) ? n >>> 0 : null;
+      return asAddr(parseInt(s, 16));
     }
     if (/^[0-9a-fA-F]+$/i.test(s) && /[a-fA-F]/.test(s)) {
-      const n = parseInt(s, 16);
-      return Number.isFinite(n) ? n >>> 0 : null;
+      return asAddr(parseInt(s, 16));
     }
     if (/^\d+$/.test(s)) {
-      const n = parseInt(s, 10);
-      return Number.isFinite(n) ? n >>> 0 : null;
+      return asAddr(parseInt(s, 10));
     }
     return null;
   }
@@ -842,7 +858,10 @@
       return;
     }
     const pid = state.attachedPid;
-    const addr = state.peepholeAddr;
+    const addr = asAddr(state.peepholeAddr);
+    if (addr == null) {
+      return;
+    }
     state.inflight = true;
     try {
       const q =
@@ -990,8 +1009,9 @@
       const maps = mapsBody.maps || [];
       state.maps = maps;
       const base = firstWritable(maps);
-      state.peepholeAddr = base ? base.start : 0;
-      state.selectedAddr = state.peepholeAddr;
+      const baseStart = base ? asAddr(base.start) : 0;
+      state.peepholeAddr = alignPeephole(baseStart);
+      state.selectedAddr = baseStart != null ? baseStart : 0;
       renderMaps(maps, state.peepholeAddr);
       setStatus(
         el.attachStatus,
@@ -1364,12 +1384,13 @@
 
   function selectAddr(addr) {
     if (state.attachedPid == null || state.scanBusy) return;
-    if (!Number.isFinite(addr)) return;
-    if (addr < state.peepholeAddr || addr >= state.peepholeAddr + HEX_N) {
-      jumpToAddr(addr, addr);
+    const target = asAddr(addr);
+    if (target == null) return;
+    if (target < state.peepholeAddr || target >= state.peepholeAddr + HEX_N) {
+      jumpToAddr(target, target);
       return;
     }
-    state.selectedAddr = addr;
+    state.selectedAddr = target;
     updateHexSel();
     renderHex(state.peepholeAddr, state.hexData, HEX_N);
   }
@@ -1396,14 +1417,16 @@
   function onHexClick(ev) {
     const span = ev.target && ev.target.closest ? ev.target.closest("[data-addr]") : null;
     if (!span || state.attachedPid == null || state.scanBusy) return;
-    const addr = parseInt(span.getAttribute("data-addr"), 10);
+    const addr = asAddr(parseInt(span.getAttribute("data-addr"), 10));
+    if (addr == null) return;
     selectAddr(addr);
   }
 
   function onHexDblClick(ev) {
     const span = ev.target && ev.target.closest ? ev.target.closest("[data-addr]") : null;
     if (!span || state.attachedPid == null || state.scanBusy) return;
-    const addr = parseInt(span.getAttribute("data-addr"), 10);
+    const addr = asAddr(parseInt(span.getAttribute("data-addr"), 10));
+    if (addr == null) return;
     selectAddr(addr);
     pokeSelectedByte();
   }

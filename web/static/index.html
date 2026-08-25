@@ -24,7 +24,7 @@
       <form id="connect-form" class="connect-cluster">
         <span id="conn-dot" class="dot" data-state="off" aria-hidden="true"></span>
         <label class="sr-only" for="host">PS5 host</label>
-        <input id="host" name="host" type="text" placeholder="PS5 IP" autocomplete="off" spellcheck="false">
+        <input id="host" name="host" type="text" maxlength="15" size="15" placeholder="192.168.0.1" autocomplete="off" spellcheck="false">
         <button type="submit" id="btn-connect">Connect</button>
         <button type="button" id="btn-discover" class="ghost" title="UDP 1010">Find</button>
         <button type="button" id="btn-disconnect" class="ghost">Disconnect</button>
@@ -84,6 +84,7 @@
         </button>
       </nav>
 
+      <div class="stage">
       <aside id="drawer" class="drawer" hidden>
         <section id="scan-panel" class="drawer-panel" hidden>
           <header class="drawer-head">
@@ -277,6 +278,7 @@
           </table>
         </div>
       </main>
+      </div>
 
       <aside class="inspector" aria-label="Selection">
         <h2>Selection</h2>

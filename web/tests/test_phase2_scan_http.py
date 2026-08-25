@@ -400,3 +400,33 @@ def test_ui_pauses_hex_poll_during_scan() -> None:
     start_at = text.find("function startHexPoll")
     start = text[start_at:text.find("function resetTargetUi", start_at)]
     assert "scanBusy" in start
+
+
+def test_ui_jump_keeps_64bit_scan_addrs() -> None:
+    """Clicking a heap scan hit must not ToInt32-align (addr & ~0xf → negative)."""
+    if not _JS.is_file():
+        pytest.skip("web/static/app.js not present")
+    text = _JS.read_text(encoding="utf-8")
+    if "function jumpToAddr" not in text:
+        pytest.skip("jumpToAddr not in app.js yet")
+
+    assert "addr & ~0xf" not in text
+    assert "function alignPeephole" in text
+    assert "function asAddr" in text
+    assert "% ROW_BYTES" in text
+
+    jump_at = text.find("function jumpToAddr")
+    jump = text[jump_at:text.find("function renderMaps", jump_at)]
+    assert "alignPeephole" in jump
+    assert "asAddr" in jump
+    assert ">>>" not in jump
+    assert "& ~" not in jump
+
+    parse_at = text.find("function parseGoto")
+    parse = text[parse_at:text.find("function u32leFromHex", parse_at)]
+    assert "asAddr" in parse
+    assert ">>> 0" not in parse
+
+    render_at = text.find("function renderScanResults")
+    render = text[render_at:text.find("async function applyScanCount", render_at)]
+    assert "jumpToAddr(addr, addr)" in render

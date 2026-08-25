@@ -6,11 +6,13 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 product: NitePR5
 active_phase: 3
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
-last_updated: 2026-08-24
-# Phase 3 code-complete: mock pytest 98 passed. Hardware poke/freeze/cheat not re-run.
+last_updated: 2026-08-25
+# Phase 3 code-complete: mock pytest. Hardware poke/freeze/cheat not re-run.
 # Web UI revamp (same session API): ImHex-style SPA chrome, hex canvas, drawers. Vanilla JS.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
 # Restart uvicorn + Disconnect/Connect after this tree. Phase 2 still code_complete. No Phase 4.
+# LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills. No Phase 4.
+# 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
 ```
 
 | Phase | State | Notes |
@@ -62,3 +64,5 @@ last_updated: 2026-08-24
 | 2026-08-24 | orchestrator | Live 400+409 + poke fail: 250 ms :744 wait timed out behind hung reads; ConnectionLost left the socket "connected". Drop on lost; wait for peers; UI stops polls on 409. pytest 96. |
 | 2026-08-24 | orchestrator | Hex poke still 409: `timed out reading 4 bytes` on `POST /api/write`. Cause: ps5dbg 0.1.1 packs PROC_WRITE payload into `datalen`; server ACKs then waits for a second payload. Two-phase `proc_write_phased` + UI pauses polls during poke. pytest 98. |
 | 2026-08-24 | orchestrator | Web UI ground-up chrome: hex canvas fills the viewport; scan/maps/watch/hold/cheats/procs as drawers; inspector + goto + keyboard. Still vanilla JS (no Node). Session API unchanged. pytest 98. |
+| 2026-08-25 | orchestrator | Installed LangSmith skills (`langsmith-trace`, dataset, evaluator). FastAPI tracing via `web/tracing.py`: Session spans + HTTP root traces; skip poll/hex; redact RAM. pytest 103. |
+| 2026-08-25 | orchestrator | Scan-hit jump sent `GET /api/read?addr=-389259952` (JS `addr & ~0xf` ToInt32). Align with modulo; `InvalidAddress` 400; parseGoto no `>>> 0`. pytest 106. |

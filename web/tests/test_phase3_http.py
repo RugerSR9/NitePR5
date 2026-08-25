@@ -298,6 +298,27 @@ def test_http_write_round_trip_and_caps(
     assert oversize.status_code == 400, oversize.text
 
 
+def test_http_read_rejects_negative_addr_keeps_64bit(
+    client_and_session: tuple[object, Session, MockTransport],
+) -> None:
+    """JS bitwise align used to GET /api/read?addr=-389259952 → 500 struct.error."""
+    client, _session, _transport = client_and_session
+    _require_http(client.app, "/api/read")
+
+    bad = client.get("/api/read", params={"addr": -389259952, "n": 512})
+    assert bad.status_code == 400, bad.text
+    body = bad.json()
+    assert body.get("error") == "InvalidAddress"
+
+    ok = client.get(
+        "/api/read",
+        params={"addr": MockTransport.RAM_BASE, "n": 16},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["addr"] == MockTransport.RAM_BASE
+    assert MockTransport.RAM_BASE > 0xFFFFFFFF
+
+
 def test_http_watch_poll_sees_write(
     client_and_session: tuple[object, Session, MockTransport],
 ) -> None:

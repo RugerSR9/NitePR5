@@ -28,6 +28,8 @@ $RECYCLE.BIN/
 !.env.example
 *.pem
 *.key
+.agents/
+.cursor/
 
 # --- Python (web UI / nitepr5-core) ---
 __pycache__/
