@@ -66,3 +66,4 @@ last_updated: 2026-08-25
 | 2026-08-24 | orchestrator | Web UI ground-up chrome: hex canvas fills the viewport; scan/maps/watch/hold/cheats/procs as drawers; inspector + goto + keyboard. Still vanilla JS (no Node). Session API unchanged. pytest 98. |
 | 2026-08-25 | orchestrator | Installed LangSmith skills (`langsmith-trace`, dataset, evaluator). FastAPI tracing via `web/tracing.py`: Session spans + HTTP root traces; skip poll/hex; redact RAM. pytest 103. |
 | 2026-08-25 | orchestrator | Scan-hit jump sent `GET /api/read?addr=-389259952` (JS `addr & ~0xf` ToInt32). Align with modulo; `InvalidAddress` 400; parseGoto no `>>> 0`. pytest 106. |
+| 2026-08-25 | orchestrator | README rewritten as post-Phase 3 product docs (setup, editor loop, caps, cheats). No runtime change. |
