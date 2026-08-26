@@ -1,0 +1,86 @@
+name: Plugin
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plugin-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check plugin source
+        id: check
+        run: |
+          if [ -f plugin/CMakeLists.txt ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "plugin/ CMakeLists.txt missing; skipping compile"
+          fi
+
+      - name: Install host tools
+        if: steps.check.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 cmake python3 wget unzip
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100 || true
+
+      - name: Install Johns SDK
+        if: steps.check.outputs.present == 'true'
+        run: |
+          curl -fsSL -o ps5-sdk.zip \
+            https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip
+          mkdir -p "${HOME}/ps5-sdk-extract"
+          unzip -q ps5-sdk.zip -d "${HOME}/ps5-sdk-extract"
+          if [ -f "${HOME}/ps5-sdk-extract/bin/prospero-cmake" ]; then
+            SDK="${HOME}/ps5-sdk-extract"
+          elif [ -f "${HOME}/ps5-sdk-extract/ps5-payload-sdk/bin/prospero-cmake" ]; then
+            SDK="${HOME}/ps5-sdk-extract/ps5-payload-sdk"
+          else
+            CMAKE_BIN="$(find "${HOME}/ps5-sdk-extract" -name prospero-cmake -type f | head -n 1)"
+            if [ -z "${CMAKE_BIN}" ]; then
+              echo "prospero-cmake not found in SDK zip" >&2
+              ls -la "${HOME}/ps5-sdk-extract" >&2
+              exit 1
+            fi
+            SDK="$(cd "$(dirname "${CMAKE_BIN}")/.." && pwd)"
+          fi
+          chmod -R a+rX "${SDK}"
+          find "${SDK}/bin" -type f -exec chmod +x {} \;
+          echo "PS5_PAYLOAD_SDK=${SDK}" >> "${GITHUB_ENV}"
+          echo "Using SDK at ${SDK}"
+
+      - name: Build nitepr5.plugin
+        if: steps.check.outputs.present == 'true'
+        run: bash plugin/build.sh
+
+      - name: Upload artifact
+        if: steps.check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nitepr5.plugin
+          path: plugin/build/nitepr5.plugin
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'release' && steps.check.outputs.present == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: plugin/build/nitepr5.plugin
+          fail_on_unmatched_files: true
