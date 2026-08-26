@@ -10,25 +10,36 @@ etaHEN background daemon that owns **freeze and cheats** when armed. It is not a
 
 ## Install
 
-Copy the built `.plugin` (produced later on an SDK machine) to:
+Do **not** send this file to elfldr **9021** (that port is for one-shot ELFs like ps5debug-NG).
 
-- USB: `<usb>/etaHEN/plugins/` (priority), or
-- Internal: `/data/etaHEN/plugins/`
+1. Get `nitepr5.plugin` from GitHub Actions (see [Build](#build)).
+2. Copy it to:
+   - USB: `<usb>/etaHEN/plugins/` (priority), or
+   - Internal: `/data/etaHEN/plugins/`
+3. Enable or **kill then run** from the etaHEN Toolbox (title **NPR500001**).
 
-Enable or kill from the etaHEN Toolbox. Plugins are already jailbroken; do not call IPC 9028.
+Plugins are already jailbroken; do not call IPC 9028.
 
 ## Build
 
-Build **only** with [etaHEN-Plugins](https://github.com/etaHEN/etaHEN-Plugins) / [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) clang. Set `PS5SDK` or `PS5_PAYLOAD_SDK`.
+This Windows PC does not compile the ELF. GitHub Actions does, using [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk) (`prospero-cmake`) on Ubuntu.
 
-Do **not** configure or compile this tree on the Windows dev PC. There is no in-tree ELF or `.plugin` (those artifacts are gitignored).
+| How | Result |
+|---|---|
+| **Actions → Plugin → Run workflow** (pick a branch) | Workflow **artifact** `nitepr5.plugin` (7 days). Download the zip from that run. |
+| **Publish a GitHub Release** | Same file attached as a **Release asset**. |
+
+Merges to `main` and pull requests do not compile. The workflow file must exist on the branch you run.
+
+`POST_BUILD` runs `scripts/make_plugin.py`: header `etaHEN_PLUGIN\0TID\0version\0` plus ELF bytes → `nitepr5.plugin`.
+
+Local Linux (optional; SDK not installed on the Windows dev PC):
 
 ```sh
-cmake -S plugin -B /tmp/nitepr5-plugin-build
-cmake --build /tmp/nitepr5-plugin-build
+export PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
+bash plugin/build.sh
+# output: plugin/build/nitepr5.plugin
 ```
-
-`POST_BUILD` runs `scripts/make_plugin.py` (vendored from etaHEN-Plugins): header `etaHEN_PLUGIN\0TID\0version\0` plus ELF bytes → `nitepr5.plugin`.
 
 ## HTTP
 

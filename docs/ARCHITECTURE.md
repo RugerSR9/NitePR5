@@ -411,3 +411,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-25 | Phase 2+3 hardware exits passed on CUSA13762 (hunt, poke, freeze, GoldHEN save/reload/toggle). Web editor is the shippable product. Phase 4 next. |
 | 2026-08-25 | Phase 4 code_complete: `plugin/` source (NPR500001, :1745) + Session `plugin_arm`/`plugin_disarm`. `freeze_tick` no-ops while armed. No ELF on the Windows PC. |
 | 2026-08-25 | Phase 4: plugin owns freeze when armed (web stops `freeze_tick`). Command port **1745**. Title **NPR500001**. Source-only `plugin/` — no PS5 ELF cross-compile on the Windows dev PC. Notifications (B1) only. |
+| 2026-08-26 | Plugin ELF is compiled in GitHub Actions only (`workflow_dispatch` artifact or Release asset). No SDK/WSL/Docker on the Windows PC. Install `.plugin` via Toolbox, never elfldr 9021. |

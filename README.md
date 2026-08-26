@@ -2,7 +2,7 @@
 
 Homebrew memory editor for a jailbroken PS5 (firmware **9.60**, **etaHEN**, **ps5debug-NG**). Named after PSP **NitePR**: search, hex-edit, freeze, and save cheats while a game runs.
 
-The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. Phase 4 plugin **source** is in `plugin/` (no ELF on this PC). Overlay is still later.
+The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. Phase 4 plugin source is in `plugin/`; GitHub Actions builds `nitepr5.plugin`. Overlay is still later.
 
 **Humans:** this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Progress: [docs/STATUS.md](docs/STATUS.md). **Agents:** start at [AGENTS.md](AGENTS.md) and [docs/HANDOFF.md](docs/HANDOFF.md).
 
@@ -10,7 +10,7 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 Phases 0–3 are **done**. The web UI is the shippable PC editor: connect, scan, poke, watch, freeze, and load/save GoldHEN JSON on hardware (**CUSA13762**).
 
-Phase 4 is **code_complete** (source + web bind + mocks). Hardware exit waits on an SDK-built `.plugin`. After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phase 4 is **code_complete** (source + web bind + mocks). Hardware exit waits on a CI-built `.plugin` (see [Plugin daemon](#plugin-daemon)). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -106,6 +106,19 @@ Shortcuts (`?` in the title bar): **G** go to address, arrows move the selection
 
 If a First Scan reports too many matches, pick a **less common** in-game value and scan again. Unknown-initial on the whole writable set can be declined if the on-console snapshot is huge.
 
+## Plugin daemon
+
+The etaHEN plugin (title **NPR500001**, version **0.40**) owns freeze and cheats when armed so they keep applying with the web UI closed. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
+
+| How | Where to download |
+|---|---|
+| **Test a branch** | Actions → **Plugin** → **Run workflow** → pick the branch. Download the `nitepr5.plugin` artifact zip from that run (kept 7 days). |
+| **Official** | Publish a GitHub Release. `nitepr5.plugin` is attached as a Release asset. |
+
+Merges to `main` and pull requests do not compile. The workflow must exist on the branch you run.
+
+Install: copy `nitepr5.plugin` to USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`, then Toolbox **kill** and **run**. Do **not** send it to elfldr **9021**.
+
 ## Cheat files
 
 GoldHEN JSON only, one file per title version: `{titleId}_{version}.json` (example `CUSA00004_01.07.json`). `offset` is hex relative to the module base (`eboot.bin` / `executable`). `on` / `off` are raw hex bytes. Schema: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §9.
@@ -124,7 +137,7 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 | 1 Connect + peephole | done | Web UI reads 512 live bytes |
 | 2 Scan loop | done | Turbo scan on-console; CUSA13762 hunt passed |
 | 3 Hex, poke, freeze, JSON | done | First usable product; poke/freeze/cheat passed on hardware |
-| 4 Plugin daemon | code_complete | Freezes/cheats on-console with no overlay; ELF not built here |
+| 4 Plugin daemon | code_complete | Freezes/cheats on-console with no overlay; `.plugin` from GitHub Actions |
 | 5 Overlay spike | not started | See-through TV panel (one backend) |
 | 6 Backlog | parked | Shared sessions, pointer/AOB, etc. — only if asked |
 

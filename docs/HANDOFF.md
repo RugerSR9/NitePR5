@@ -8,12 +8,12 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-25)
 
-Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–3. **No PS5 ELF cross-compile** on this Windows PC.
+Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–3. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
 
 | Fact | Value |
 |---|---|
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
-| Phase 4 | `code_complete` — `plugin/` source + web Arm/Disarm; hardware exit waits on `.plugin` |
+| Phase 4 | `code_complete` — `plugin/` source + web Arm/Disarm; `.plugin` from GitHub Actions |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
 | Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
 
@@ -27,7 +27,7 @@ Paste into every Phase 4 worker brief.
 - **PROC_WRITE:** two-phase only (16-byte `<IQI` pid, addr, length LE → ACK → payload → FINAL). Never pack payload into `datalen`.
 - **Persist:** `/data/nitepr5/state.json` + cheats in `/data/nitepr5/cheats/`. Never `/data/etaHEN/cheats/`.
 - **Notify (B1):** toast on start / armed / `:744` missing. No ShellUI, no game PRX, no pad, no `libhijacker` into the title.
-- **No ELF build here.** Do not install a PS5 toolchain, WSL, Docker, or CI compile.
+- **No ELF on this Windows PC.** Do not install a PS5 toolchain, WSL, or Docker locally. GitHub Actions compiles (`workflow_dispatch` artifact or Release asset).
 
 **Command channel (plugin listens on LAN :1745):**
 
@@ -43,7 +43,7 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### Phase 4 SDK facts (explore 2026-08-25)
 
-- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`lib/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$`, version `^\d\.\d{2}$`.
+- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`plugin/scripts/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$` (NPR500001 is extra-allowed), version `^\d\.\d{2}$`. CI: `.github/workflows/plugin.yml`.
 - CMake: copy **utility_daemon** (not Injector / Error_Disabling). `PLUGIN_TITLE_ID NPR500001`, `PLUGIN_VERSION 0.40`, basename `nitepr5`. Link `SceLibcInternal SceSystemService SceNet SceSysmodule SceUserService SceNetCtl kernel_sys`. **No** `hijacker`, **no** `ScePad`.
 - Notify: classic `notify_request` `{char useless1[45]; char message[3075];}` + `sceKernelSendNotificationRequest(0,&req,sizeof req,0)`. Do not use libhijacker `printf_notification`.
 - Sockets: **POSIX** `socket/bind/listen/accept` on `0.0.0.0:1745` (utility_daemon `tcp.c`). Not sceHttp2.
@@ -53,11 +53,11 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. Hardware exit: build `nitepr5.plugin` with etaHEN-Plugins/SDK **elsewhere**, copy to `/data/etaHEN/plugins` or USB `etaHEN/plugins`, Toolbox enable **NPR500001**, web Arm plugin on CUSA13762, **close the browser** — freeze/cheat still applies. If Toolbox rejects the TID, ask before changing to `NITE00001`.
+Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. Hardware exit: GitHub Actions → **Plugin** → **Run workflow** (or a Release) → download `nitepr5.plugin` → copy to `/data/etaHEN/plugins` or USB `etaHEN/plugins` → Toolbox enable **NPR500001** → web Arm plugin on CUSA13762 → **close the browser** — freeze/cheat still applies. If Toolbox rejects the TID, ask before changing to `NITE00001`. Do not send the file to elfldr **9021**.
 
-### Phase 4 plugin tree (Wave 1, source only)
+### Phase 4 plugin tree
 
-`plugin/` exists. Title NPR500001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. No ELF built here.
+`plugin/` exists. Title NPR500001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
 
 `make_plugin.py` accepts **NPR500001** as an extra TID (stock etaHEN regex is 4 letters + 5 digits; this ID is 3+6). If Toolbox refuses the plugin, try `NITE00001` later — do not change the locked ID unless the user says so.
 
@@ -123,9 +123,9 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `in_progress`
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `code_complete`
 
-Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this PC.
+Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this Windows PC (CI is allowed).
 
 ---
 
@@ -542,5 +542,5 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 4 | etaHEN plugin daemon |
+| 4 hardware | Install CI-built `nitepr5.plugin` via Toolbox; confirm freeze with web UI closed |
 | 5 | Overlay spike B2 **or** B3 |
