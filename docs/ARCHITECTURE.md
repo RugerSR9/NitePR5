@@ -410,6 +410,8 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-24 | Web editor chrome is an ImHex-style SPA: hex grid is the canvas; other tools live in drawers. Stay **vanilla JS** in `web/static` (no React/Vue/Node). Hex libraries aimed at whole-file dumps do not fit the 512-byte peephole. Fonts: IBM Plex Sans + JetBrains Mono with system fallbacks. |
 | 2026-08-25 | Phase 2+3 hardware exits passed on CUSA13762 (hunt, poke, freeze, GoldHEN save/reload/toggle). Web editor is the shippable product. Phase 4 next. |
 | 2026-08-25 | Phase 4 code_complete: `plugin/` source (NTPR50001, :1745) + Session `plugin_arm`/`plugin_disarm`. `freeze_tick` no-ops while armed. No ELF on the Windows PC. |
+| 2026-08-26 | Do not set `TS_RESCAN_ALIASING` on COUNT. A second :744 client (etaHEN plugin) over-subscribes aliasing; Next Scan then returns 200 and the next PROC_READ times out. PROC_NOP after turbo START/COUNT before hex resumes. |
 | 2026-08-25 | Phase 4: plugin owns freeze when armed (web stops `freeze_tick`). Command port **1745**. Title **NTPR50001**. Source-only `plugin/` — no PS5 ELF cross-compile on the Windows dev PC. Notifications (B1) only. |
 | 2026-08-26 | Plugin ELF is compiled in GitHub Actions only (`workflow_dispatch` artifact or Release asset). No SDK/WSL/Docker on the Windows PC. Install `.plugin` via Toolbox, never elfldr 9021. |
 | 2026-08-26 | Plugin title ID is **NTPR50001** (`^[A-Za-z]{4}\d{5}$`). **NPR500001** (3 letters + 6 digits) is invalid; etaHEN will not load it. User confirmed load + startup toast. |
+| 2026-08-26 | Phase 4 hardware exit passed: plugin freeze overwrites a manual web poke. Phase 4 `done`. Overlay (Phase 5) stays parked until asked. |

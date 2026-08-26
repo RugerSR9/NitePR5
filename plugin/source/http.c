@@ -443,6 +443,8 @@ static void handle_disarm(int fd)
     nitepr5_state_t *st = nitepr5_state();
 
     st->armed = 0;
+    dbg_disconnect();
+    st->dbg = 0;
     (void)fs_state_save();
     http_send(fd, 200, "{\"ok\":true,\"armed\":false}");
 }

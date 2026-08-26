@@ -8,9 +8,7 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 ## Status
 
-Phases 0–3 are **done**. The web UI is the shippable PC editor: connect, scan, poke, watch, freeze, and load/save GoldHEN JSON on hardware (**CUSA13762**).
-
-Phase 4 is **code_complete** (source + web bind + mocks). Hardware exit waits on a CI-built `.plugin` (see [Plugin daemon](#plugin-daemon)). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phases 0–4 are **done**. The web UI is the shippable PC editor; the etaHEN plugin (**NTPR50001**) owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -137,7 +135,7 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 | 1 Connect + peephole | done | Web UI reads 512 live bytes |
 | 2 Scan loop | done | Turbo scan on-console; CUSA13762 hunt passed |
 | 3 Hex, poke, freeze, JSON | done | First usable product; poke/freeze/cheat passed on hardware |
-| 4 Plugin daemon | code_complete | Freezes/cheats on-console with no overlay; `.plugin` from GitHub Actions |
+| 4 Plugin daemon | done | Freezes on-console (NTPR50001); `.plugin` from GitHub Actions |
 | 5 Overlay spike | not started | See-through TV panel (one backend) |
 | 6 Backlog | parked | Shared sessions, pointer/AOB, etc. — only if asked |
 

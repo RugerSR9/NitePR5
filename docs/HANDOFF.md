@@ -6,14 +6,14 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ---
 
-## Next orchestrator — start here (2026-08-25)
+## Next orchestrator — start here (2026-08-26)
 
-Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–3. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
+Phases **0–4 are `done`** on hardware. Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
 
 | Fact | Value |
 |---|---|
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
-| Phase 4 | `code_complete` — `plugin/` source + web Arm/Disarm; `.plugin` from GitHub Actions |
+| Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
 | Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
 
@@ -53,7 +53,7 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. **NTPR50001** loads in Toolbox (user 2026-08-26; startup toast seen). Hardware exit remaining: web Arm on CUSA13762 → **close the browser** — freeze/cheat still applies. Do not send the file to elfldr **9021**.
+Phase 4 is **`done`**. Do **not** start Phase 5 unless the user asks. **NTPR50001** loads (startup toast). Freeze: a web poke is overwritten by the plugin tick (user 2026-08-26). Do not send the file to elfldr **9021**.
 
 ### Phase 4 plugin tree
 
@@ -123,7 +123,7 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `code_complete`
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `done`; do not start Phase 5 unless asked
 
 Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this Windows PC (CI is allowed).
 
@@ -348,7 +348,7 @@ Logger `nitepr5` (INFO): `first scan: N rw- segments, X MiB (pcd|maps-fallback)`
 - `authenticate(flags=2)` before stateful scan (`scan_caps` does not need auth)
 - Caps → cheap region classify (`probe_bytes=1`) → `turboscan_start_resident` (one range) or **segment gap-fill**
 - Multi-segment: flags `TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS` plus **`TS_USE_ALIASING` when `TSE_ALIASING` is advertised** (`TS_SNAPSHOT` **clear**; never `TS_PARALLEL_COMPARE` on resident). After the two value acks, send `u32 count` then `count × {u64 addr; u32 length}` (12 bytes each). Packet address/length ignored. Bound `1 .. 1048576`. Reply `{u32 resident_stored; u64 count}`. `resident_stored==0` → declined. Implemented in `scan.turbo_start_resident_segments` using `ps5dbg.turboscan` packing + `Cmd` + `connection` — **no new opcodes**. `turboscan_start_resident` in ps5dbg 0.1.1 does **not** send this list.
-- Next: `turboscan_count_resident` with **`TS_RESCAN_ALIASING` when advertised** (progress is a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**)
+- Next: `turboscan_count_resident` **without** `TS_RESCAN_ALIASING` (progress is still a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**). Then `PROC_NOP` with the normal 10s timeout before hex/watch resume. Do not OR rescan-aliasing: the plugin (or any second :744 client) over-subscribes it; live Next Scan 200 then peephole `timed out reading 4 bytes`.
 - Results: `turboscan_get_resident` only if `count ≤ 256`
 - Unknown: `TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS | TS_SERVER_RESIDENT` (+ aliasing if advertised). Drain plan/progress/summary; never download RAM. No iterative fallback for unknown → `ScanUnsupported`. ps5dbg raises `NotImplementedError` if you pass `TS_SNAPSHOT` into `turboscan_start_resident`; use `turbo_start_snapshot_segments`.
 - Fallback **only if turbo caps are missing**: `protocol.proc_scan_start/count/get` (client-held candidates, still ≤256 rows out). If turbo exists but `resident_stored==0` on an exact first scan, **retry snapshot + exact COUNT** (bitmap stays on the console; common values overflow the 256 MiB match list). If snapshot is missing or declined → `ScanUnsupported`. Never stream the hit list. Unknown never uses iterative.
@@ -542,5 +542,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 4 hardware | Plugin **NTPR50001** loads (startup toast). Confirm freeze/cheat with web UI closed |
 | 5 | Overlay spike B2 **or** B3 |

@@ -5,12 +5,12 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 ```yaml
 product: NitePR5
 active_phase: 4
-phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
+phase_state: done   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-26
-# Phase 4 code_complete: plugin/ source + web Arm/Disarm. No ELF on this Windows PC.
-# GitHub Actions builds nitepr5.plugin (workflow_dispatch artifact or Release asset).
+# Phase 4 done on hardware: NTPR50001 loads; plugin freeze overwrites web pokes.
+# GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
+# Do not start Phase 5 (overlay/) unless the user asks.
 # Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NTPR50001.
-# Plugin NTPR50001 loads (startup toast). Hardware exit remaining: freeze with web UI closed.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
 # 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
@@ -22,13 +22,13 @@ last_updated: 2026-08-26
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
-| 4 Plugin daemon | code_complete | NTPR50001 loads (startup toast). Remaining: freeze with web UI closed |
+| 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 4 plugin **NTPR50001** loads (startup toast, user 2026-08-26). Hardware exit still needs freeze/cheat with the web UI closed. GitHub Actions compiles the ELF; this Windows PC does not.
+- Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
 
 ## Session log
@@ -74,3 +74,5 @@ last_updated: 2026-08-26
 | 2026-08-25 | orchestrator | Wave 2 merged: Session `plugin_arm`/`disarm`, Hold Arm/Disarm, mock HTTP :1745. `code_complete`. Hardware blocked on SDK ELF. |
 | 2026-08-26 | orchestrator | Plugin CI: `.github/workflows/plugin.yml` (Run workflow artifact + Release asset). `plugin/build.sh` + Johns SDK. No toolchain on this PC. |
 | 2026-08-26 | orchestrator | Title ID locked **NTPR50001** (4 letters + 5 digits). NPR500001 was invalid; etaHEN would not load it. User: plugin loads, startup toast seen. |
+| 2026-08-26 | orchestrator | Phase 4 hardware exit passed: console freeze overwrites a manual web poke. Marked `done`. No Phase 5 unless asked. |
+| 2026-08-26 | orchestrator | After 3–4 scans: Next Scan 200 then peephole `timed out reading 4 bytes`. Dropped `TS_RESCAN_ALIASING`; PROC_NOP after turbo COUNT. Plugin connects :744 only when armed. |
