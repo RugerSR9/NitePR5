@@ -10,7 +10,7 @@ last_updated: 2026-08-26
 # Phase 4 code_complete: plugin/ source + web Arm/Disarm. No ELF on this Windows PC.
 # GitHub Actions builds nitepr5.plugin (workflow_dispatch artifact or Release asset).
 # Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NTPR50001.
-# Hardware exit blocked until a CI .plugin is installed via Toolbox.
+# Plugin NTPR50001 loads (startup toast). Hardware exit remaining: freeze with web UI closed.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
 # 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
@@ -22,13 +22,13 @@ last_updated: 2026-08-26
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
-| 4 Plugin daemon | code_complete | Source + web bind; `.plugin` from GitHub Actions. Hardware exit = Toolbox + web closed |
+| 4 Plugin daemon | code_complete | NTPR50001 loads (startup toast). Remaining: freeze with web UI closed |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 4 ELF is **not built on this Windows PC**. GitHub Actions compiles it (Actions → Plugin → Run workflow, or a Release). Hardware exit waits on installing that `.plugin`. Mock tests pass.
+- Phase 4 plugin **NTPR50001** loads (startup toast, user 2026-08-26). Hardware exit still needs freeze/cheat with the web UI closed. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
 
 ## Session log
@@ -73,3 +73,4 @@ last_updated: 2026-08-26
 | 2026-08-25 | orchestrator | Wave 1 `plugin/` source in (NTPR50001, :1745, two-phase PROC_WRITE). No ELF. Spawn Wave 2 web bind + tests (disjoint paths). |
 | 2026-08-25 | orchestrator | Wave 2 merged: Session `plugin_arm`/`disarm`, Hold Arm/Disarm, mock HTTP :1745. `code_complete`. Hardware blocked on SDK ELF. |
 | 2026-08-26 | orchestrator | Plugin CI: `.github/workflows/plugin.yml` (Run workflow artifact + Release asset). `plugin/build.sh` + Johns SDK. No toolchain on this PC. |
+| 2026-08-26 | orchestrator | Title ID locked **NTPR50001** (4 letters + 5 digits). NPR500001 was invalid; etaHEN would not load it. User: plugin loads, startup toast seen. |

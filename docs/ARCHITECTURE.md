@@ -412,3 +412,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-25 | Phase 4 code_complete: `plugin/` source (NTPR50001, :1745) + Session `plugin_arm`/`plugin_disarm`. `freeze_tick` no-ops while armed. No ELF on the Windows PC. |
 | 2026-08-25 | Phase 4: plugin owns freeze when armed (web stops `freeze_tick`). Command port **1745**. Title **NTPR50001**. Source-only `plugin/` — no PS5 ELF cross-compile on the Windows dev PC. Notifications (B1) only. |
 | 2026-08-26 | Plugin ELF is compiled in GitHub Actions only (`workflow_dispatch` artifact or Release asset). No SDK/WSL/Docker on the Windows PC. Install `.plugin` via Toolbox, never elfldr 9021. |
+| 2026-08-26 | Plugin title ID is **NTPR50001** (`^[A-Za-z]{4}\d{5}$`). **NPR500001** (3 letters + 6 digits) is invalid; etaHEN will not load it. User confirmed load + startup toast. |

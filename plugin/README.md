@@ -2,7 +2,7 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.40**, basename **nitepr5**
+- Title ID **NTPR50001**, version **0.40**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI)
 - Game writes go through **127.0.0.1:744** (ps5debug-NG). Two-phase `PROC_WRITE` only.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`)

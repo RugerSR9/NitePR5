@@ -22,7 +22,7 @@ Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not 
 Paste into every Phase 4 worker brief.
 
 - **Handoff:** when the plugin is armed, **it owns freeze**. Web **stops** `POST /api/freeze/tick`. Scan / hex / watch stay on the PC (`:744` LAN). Plugin writes via **`127.0.0.1:744`**.
-- **Title** `NTPR50001`, version `0.40`. **Command port 1745** (HTTP, JSON). Not 744 / 9021 / 9028 / 9999 / 1744.
+- **Title** `NTPR50001` (`^[A-Za-z]{4}\d{5}$`), version `0.40`. **Command port 1745** (HTTP, JSON). Not 744 / 9021 / 9028 / 9999 / 1744. Do not use `NPR500001` (3 letters + 6 digits — etaHEN will not load it).
 - **Caps:** freeze ≤32, data 1–8 bytes, tick 15 Hz. 33rd freeze → refuse. Cheat toggle uses GoldHEN `on`/`off` at `module_base+offset`. `executable` maps count as `eboot.bin`.
 - **PROC_WRITE:** two-phase only (16-byte `<IQI` pid, addr, length LE → ACK → payload → FINAL). Never pack payload into `datalen`.
 - **Persist:** `/data/nitepr5/state.json` + cheats in `/data/nitepr5/cheats/`. Never `/data/etaHEN/cheats/`.
@@ -43,7 +43,7 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### Phase 4 SDK facts (explore 2026-08-25)
 
-- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`plugin/scripts/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$` (NTPR50001 is extra-allowed), version `^\d\.\d{2}$`. CI: `.github/workflows/plugin.yml`.
+- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`plugin/scripts/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$`, version `^\d\.\d{2}$`. Locked **NTPR50001**. CI: `.github/workflows/plugin.yml`.
 - CMake: copy **utility_daemon** (not Injector / Error_Disabling). `PLUGIN_TITLE_ID NTPR50001`, `PLUGIN_VERSION 0.40`, basename `nitepr5`. Link `SceLibcInternal SceSystemService SceNet SceSysmodule SceUserService SceNetCtl kernel_sys`. **No** `hijacker`, **no** `ScePad`.
 - Notify: classic `notify_request` `{char useless1[45]; char message[3075];}` + `sceKernelSendNotificationRequest(0,&req,sizeof req,0)`. Do not use libhijacker `printf_notification`.
 - Sockets: **POSIX** `socket/bind/listen/accept` on `0.0.0.0:1745` (utility_daemon `tcp.c`). Not sceHttp2.
@@ -53,13 +53,13 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. Hardware exit: GitHub Actions → **Plugin** → **Run workflow** (or a Release) → download `nitepr5.plugin` → copy to `/data/etaHEN/plugins` or USB `etaHEN/plugins` → Toolbox enable **NTPR50001** → web Arm plugin on CUSA13762 → **close the browser** — freeze/cheat still applies. If Toolbox rejects the TID, ask before changing to `NITE00001`. Do not send the file to elfldr **9021**.
+Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. **NTPR50001** loads in Toolbox (user 2026-08-26; startup toast seen). Hardware exit remaining: web Arm on CUSA13762 → **close the browser** — freeze/cheat still applies. Do not send the file to elfldr **9021**.
 
 ### Phase 4 plugin tree
 
 `plugin/` exists. Title NTPR50001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
 
-`make_plugin.py` accepts **NTPR50001** as an extra TID (stock etaHEN regex is 4 letters + 5 digits; this ID is 3+6). If Toolbox refuses the plugin, try `NITE00001` later — do not change the locked ID unless the user says so.
+`make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
 
 Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`.
 
@@ -542,5 +542,5 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 4 hardware | Install CI-built `nitepr5.plugin` via Toolbox; confirm freeze with web UI closed |
+| 4 hardware | Plugin **NTPR50001** loads (startup toast). Confirm freeze/cheat with web UI closed |
 | 5 | Overlay spike B2 **or** B3 |
