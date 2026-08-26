@@ -493,6 +493,10 @@ table.hex span.asc.in-range {
 #cheat-panel tbody tr { cursor: default; }
 #maps-panel tbody tr { cursor: pointer; }
 
+#freeze-hint.plugin-armed {
+  color: var(--gold);
+}
+
 button.btn-row {
   padding: 0.12rem 0.4rem;
   font-size: 0.75rem;

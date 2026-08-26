@@ -5,10 +5,12 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 ```yaml
 product: NitePR5
 active_phase: 4
-phase_state: not_started   # not_started | in_progress | code_complete | blocked_on_hardware | done
-last_updated: 2026-08-25
-# Phases 0–3 done on hardware (user 2026-08-25). Phase 4 plugin/ not created until this phase starts.
-# Web UI: ImHex-style SPA chrome, hex canvas, drawers. Vanilla JS. Session API unchanged.
+phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
+last_updated: 2026-08-26
+# Phase 4 code_complete: plugin/ source + web Arm/Disarm. No ELF on this Windows PC.
+# GitHub Actions builds nitepr5.plugin (workflow_dispatch artifact or Release asset).
+# Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NPR500001.
+# Hardware exit blocked until a CI .plugin is installed via Toolbox.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
 # 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
@@ -20,13 +22,13 @@ last_updated: 2026-08-25
 | 1 Web connect + peephole read | done | CUSA13762 eboot pid 115; two 512-byte peephole reads |
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
-| 4 Plugin daemon | not_started | Do not create `plugin/` until this phase starts |
+| 4 Plugin daemon | code_complete | Source + web bind; `.plugin` from GitHub Actions. Hardware exit = Toolbox + web closed |
 | 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- None for Phases 0–3. Phase 4 has not started.
+- Phase 4 ELF is **not built on this Windows PC**. GitHub Actions compiles it (Actions → Plugin → Run workflow, or a Release). Hardware exit waits on installing that `.plugin`. Mock tests pass.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
 
 ## Session log
@@ -66,3 +68,8 @@ last_updated: 2026-08-25
 | 2026-08-25 | orchestrator | Scan-hit jump sent `GET /api/read?addr=-389259952` (JS `addr & ~0xf` ToInt32). Align with modulo; `InvalidAddress` 400; parseGoto no `>>> 0`. pytest 106. |
 | 2026-08-25 | orchestrator | README rewritten as post-Phase 3 product docs (setup, editor loop, caps, cheats). No runtime change. |
 | 2026-08-25 | orchestrator | User confirmed Phase 2+3 hardware exits (CUSA13762 hunt, poke/freeze/cheat). Marked `done`. Phase 4 `not_started`; no `plugin/`. |
+| 2026-08-25 | orchestrator | Phase 4 started. Freeze handoff to plugin; command port 1745; title NPR500001; source-only (no ELF cross-compile). Spawn explore, then plugin/, then web bind + tests. |
+| 2026-08-25 | orchestrator | Wave 0 explore done: `.plugin` header, utility_daemon CMake, POSIX :1745, classic notify, vendor cJSON. Spawn Wave 1 `plugin/` C (no compile). |
+| 2026-08-25 | orchestrator | Wave 1 `plugin/` source in (NPR500001, :1745, two-phase PROC_WRITE). No ELF. Spawn Wave 2 web bind + tests (disjoint paths). |
+| 2026-08-25 | orchestrator | Wave 2 merged: Session `plugin_arm`/`disarm`, Hold Arm/Disarm, mock HTTP :1745. `code_complete`. Hardware blocked on SDK ELF. |
+| 2026-08-26 | orchestrator | Plugin CI: `.github/workflows/plugin.yml` (Run workflow artifact + Release asset). `plugin/build.sh` + Johns SDK. No toolchain on this PC. |

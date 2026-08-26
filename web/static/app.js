@@ -65,6 +65,8 @@
     freezeStatus: document.getElementById("freeze-status"),
     freezeBody: document.getElementById("freeze-body"),
     freezeBadge: document.getElementById("freeze-badge"),
+    btnPluginArm: document.getElementById("btn-plugin-arm"),
+    btnPluginDisarm: document.getElementById("btn-plugin-disarm"),
     cheatFile: document.getElementById("cheat-file"),
     btnCheatLoad: document.getElementById("btn-cheat-load"),
     btnCheatSave: document.getElementById("btn-cheat-save"),
@@ -125,6 +127,8 @@
     freezes: [],
     freezeTimer: null,
     freezeInflight: false,
+    pluginArmed: false,
+    pluginDbg: null,
     cheatLoaded: false,
     drawer: null,
     hostLabel: "",
@@ -636,12 +640,23 @@
       el.watchHint.textContent = fullW ? "64/64 — remove one to add" : "";
     }
     if (el.freezeHint) {
-      el.freezeHint.textContent = fullF ? "32/32 — remove one to add" : "";
+      if (state.pluginArmed) {
+        let hint = "Plugin owns freeze; web tick paused.";
+        if (state.pluginDbg === true) hint += " dbg on.";
+        else if (state.pluginDbg === false) hint += " dbg off.";
+        el.freezeHint.textContent = hint;
+        el.freezeHint.classList.add("plugin-armed");
+      } else {
+        el.freezeHint.classList.remove("plugin-armed");
+        el.freezeHint.textContent = fullF ? "32/32 — remove one to add" : "";
+      }
     }
     if (el.btnWatchAdd) el.btnWatchAdd.disabled = !attached || busy || fullW;
     if (el.btnWatchHex) el.btnWatchHex.disabled = !attached || busy || fullW;
     if (el.btnFreezeHex) el.btnFreezeHex.disabled = !attached || busy || fullF;
     if (el.btnPokeU32) el.btnPokeU32.disabled = !attached || busy;
+    if (el.btnPluginArm) el.btnPluginArm.disabled = !attached;
+    if (el.btnPluginDisarm) el.btnPluginDisarm.disabled = !state.connected;
     if (el.btnCheatLoad) el.btnCheatLoad.disabled = !state.connected;
     if (el.btnCheatSave) el.btnCheatSave.disabled = !state.connected;
     if (el.btnCheatSaveFreezes) {
@@ -819,7 +834,8 @@
   }
 
   function resetTargetUi() {
-    /* Match Session.connect -> disconnect: drop logical attach, maps, peephole. */
+    /* Match Session.connect -> disconnect: drop logical attach, maps, peephole.
+       Do not disarm the console plugin and do not clear pluginArmed. */
     stopHexPoll();
     stopWatchPoll();
     stopFreezeTick();
@@ -1097,6 +1113,10 @@
   }
 
   function startFreezeTick() {
+    if (state.pluginArmed) {
+      stopFreezeTick();
+      return;
+    }
     stopFreezeTick();
     if (state.paused || state.scanBusy || document.hidden || state.attachedPid == null) return;
     if (!(state.freezes || []).length) return;
@@ -1247,6 +1267,7 @@
   }
 
   async function tickFreeze() {
+    if (state.pluginArmed) return;
     if (state.freezeInflight || state.paused || state.scanBusy || document.hidden || state.attachedPid == null) {
       return;
     }
@@ -1312,6 +1333,48 @@
       if (!(state.freezes || []).length) {
         stopFreezeTick();
         setStatus(el.freezeStatus, "");
+      }
+    } catch (err) {
+      setStatus(el.freezeStatus, String(err.message || err), true);
+    }
+  }
+
+  function applyPluginStatus(st) {
+    if (!st) return;
+    if (typeof st.armed === "boolean") {
+      state.pluginArmed = st.armed;
+    }
+    if (typeof st.dbg === "boolean") {
+      state.pluginDbg = st.dbg;
+    }
+    syncWatchFreezeButtons();
+  }
+
+  async function onPluginArm() {
+    if (state.attachedPid == null) return;
+    setStatus(el.freezeStatus, "Arming plugin…");
+    try {
+      const st = await apiPost("/api/plugin/arm", {});
+      applyPluginStatus(st);
+      state.pluginArmed = true;
+      stopFreezeTick();
+      setStatus(el.freezeStatus, "Plugin armed — freeze on console");
+      syncWatchFreezeButtons();
+    } catch (err) {
+      setStatus(el.freezeStatus, String(err.message || err), true);
+    }
+  }
+
+  async function onPluginDisarm() {
+    setStatus(el.freezeStatus, "Disarming plugin…");
+    try {
+      const st = await apiPost("/api/plugin/disarm", {});
+      applyPluginStatus(st);
+      state.pluginArmed = false;
+      setStatus(el.freezeStatus, "Plugin disarmed");
+      syncWatchFreezeButtons();
+      if ((state.freezes || []).length) {
+        startFreezeTick();
       }
     } catch (err) {
       setStatus(el.freezeStatus, String(err.message || err), true);
@@ -1696,6 +1759,8 @@
   if (el.btnWatchAdd) el.btnWatchAdd.addEventListener("click", onAddWatchClick);
   if (el.btnWatchHex) el.btnWatchHex.addEventListener("click", onAddWatchClick);
   if (el.btnFreezeHex) el.btnFreezeHex.addEventListener("click", freezeFromHex);
+  if (el.btnPluginArm) el.btnPluginArm.addEventListener("click", onPluginArm);
+  if (el.btnPluginDisarm) el.btnPluginDisarm.addEventListener("click", onPluginDisarm);
   if (el.btnPokeU32) el.btnPokeU32.addEventListener("click", onPokeU32);
   if (el.btnCheatLoad) el.btnCheatLoad.addEventListener("click", onCheatLoad);
   if (el.btnCheatSave) el.btnCheatSave.addEventListener("click", onCheatSave);

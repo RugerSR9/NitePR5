@@ -22,8 +22,11 @@ background threads.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -31,6 +34,7 @@ from pathlib import Path
 
 from .cheat import (
     cheat_file_from_freezes,
+    cheat_to_dict,
     load_cheat_file,
     module_base_from_maps,
     save_cheat_file,
@@ -42,6 +46,8 @@ from .constants import (
     FREEZE_MAX,
     FREEZE_SIZE_MAX,
     FREEZE_SIZE_MIN,
+    PLUGIN_HTTP_TIMEOUT,
+    PLUGIN_PORT,
     PS5DEBUG_PORT,
     READ_MAX,
     RESULTS_MAX,
@@ -75,6 +81,8 @@ from .errors import (
     NoTarget,
     NoWatch,
     NotConnected,
+    PluginError,
+    PluginUnreachable,
     ReadTooLarge,
     ResultsTooMany,
     ScanActive,
@@ -107,6 +115,7 @@ from .types import (
     FreezeEntry,
     ForegroundInfo,
     MemoryMap,
+    PluginStatus,
     ProcessInfo,
     ScanHit,
     WatchEntry,
@@ -143,6 +152,45 @@ def _require_addr(addr: object) -> int:
     return addr
 
 
+def _plugin_error_message(raw: bytes) -> str:
+    try:
+        obj = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return "plugin HTTP 400"
+    if isinstance(obj, dict) and obj.get("error"):
+        return str(obj["error"])
+    return "plugin HTTP 400"
+
+
+def _plugin_status_from_json(raw: bytes) -> PluginStatus:
+    try:
+        obj = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise PluginUnreachable("plugin returned invalid JSON") from exc
+    if not isinstance(obj, dict):
+        raise PluginUnreachable("plugin returned invalid JSON")
+    enabled_raw = obj.get("enabled") or []
+    if not isinstance(enabled_raw, list):
+        enabled_raw = []
+    pid_raw = obj.get("pid") or 0
+    freeze_raw = obj.get("freeze_count") or 0
+    try:
+        pid = int(pid_raw)
+        freeze_count = int(freeze_raw)
+    except (TypeError, ValueError):
+        pid = 0
+        freeze_count = 0
+    return PluginStatus(
+        ok=bool(obj.get("ok", True)),
+        armed=bool(obj.get("armed", False)),
+        pid=pid,
+        freeze_count=freeze_count,
+        cheat_id=str(obj.get("cheat_id") or ""),
+        enabled=[str(x) for x in enabled_raw],
+        dbg=bool(obj.get("dbg", False)),
+    )
+
+
 class Session:
     """One PS5Debug client session. Construct with a transport (default real)."""
 
@@ -163,6 +211,12 @@ class Session:
         self._next_freeze_id = 1
         self._cheat: CheatFile | None = None
         self._cheat_enabled: set[str] = set()
+        # Last successful connect() host. Survives disconnect() so we still
+        # know the LAN IP; plugin HTTP is a separate socket from :744.
+        self._plugin_host: str | None = None
+        # True after a successful POST /arm. Disconnecting :744 must not clear
+        # this — the console plugin keeps freeze (Phase 4 handoff).
+        self._plugin_armed = False
 
     def __enter__(self) -> Session:
         return self
@@ -244,6 +298,7 @@ class Session:
             self.disconnect()
             self._transport.connect(host, port=PS5DEBUG_PORT, timeout=CONNECT_TIMEOUT)
             self._host = host
+            self._plugin_host = host
 
     def disconnect(self) -> None:
         with self._hold_io():
@@ -253,6 +308,16 @@ class Session:
             self._target_pid = None
             self._maps_cache.clear()
             self._clear_watches_and_freezes()
+            # Do not auto-disarm the console plugin. Do not clear
+            # _plugin_armed / _plugin_host — web UI closed is the Phase 4 exit.
+
+    def plugin_host(self) -> str | None:
+        """LAN host of the last successful ``connect()`` (PS5, not 127.0.0.1)."""
+        return self._plugin_host
+
+    def plugin_armed(self) -> bool:
+        """In-memory: True after a successful ``plugin_arm`` until ``plugin_disarm``."""
+        return self._plugin_armed
 
     def processes(self) -> list[ProcessInfo]:
         """pid, name, and titleid when cheap (foreground pid or eboot.bin proc_info)."""
@@ -449,7 +514,13 @@ class Session:
         del self._freezes[freeze_id]
 
     def freeze_tick(self) -> int:
-        """Write each frozen patch once. Returns how many writes. No 15 Hz loop."""
+        """Write each frozen patch once. Returns how many writes. No 15 Hz loop.
+
+        When the console plugin is armed it owns freeze — return 0 and do
+        not take :744 / do not write (Phase 4 handoff).
+        """
+        if self._plugin_armed:
+            return 0
         if not self._freezes:
             return 0
         self._require_connected()
@@ -459,6 +530,91 @@ class Session:
                 self._transport.write(entry.pid, address=entry.addr, data=entry.data)
                 written += 1
         return written
+
+    def _resolve_plugin_host(self, host: str | None) -> str:
+        if host is not None:
+            chosen = host.strip()
+            if chosen:
+                return chosen
+        if self.connected and self._host:
+            return self._host
+        # disconnect() clears _host but keeps _plugin_host so Disarm still
+        # reaches the console after the web UI drops :744.
+        if self._plugin_host:
+            return self._plugin_host
+        raise NotConnected("no PS5 host for plugin HTTP (connect first)")
+
+    def _plugin_http(
+        self,
+        method: str,
+        path: str,
+        host: str | None,
+        body: dict | None = None,
+    ) -> PluginStatus:
+        dest = self._resolve_plugin_host(host)
+        url = f"http://{dest}:{PLUGIN_PORT}{path}"
+        headers = {"Accept": "application/json"}
+        data: bytes | None = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=PLUGIN_HTTP_TIMEOUT) as resp:
+                raw = resp.read()
+                status_code = getattr(resp, "status", None) or resp.getcode()
+        except urllib.error.HTTPError as exc:
+            err_body = b""
+            try:
+                err_body = exc.read() or b""
+            except OSError:
+                err_body = b""
+            if exc.code == 400:
+                raise PluginError(_plugin_error_message(err_body)) from exc
+            raise PluginUnreachable(
+                f"cannot reach plugin at {dest}:{PLUGIN_PORT} (HTTP {exc.code})"
+            ) from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            raise PluginUnreachable(
+                f"cannot reach plugin at {dest}:{PLUGIN_PORT}: {reason}"
+            ) from exc
+        except (TimeoutError, OSError) as exc:
+            raise PluginUnreachable(
+                f"cannot reach plugin at {dest}:{PLUGIN_PORT}: {exc}"
+            ) from exc
+        if status_code != 200:
+            raise PluginUnreachable(
+                f"cannot reach plugin at {dest}:{PLUGIN_PORT} (HTTP {status_code})"
+            )
+        return _plugin_status_from_json(raw)
+
+    def plugin_status(self, host: str | None = None) -> PluginStatus:
+        """GET the plugin ``/status`` on the PS5 LAN host:1745."""
+        return self._plugin_http("GET", "/status", host)
+
+    def plugin_arm(self, host: str | None = None) -> PluginStatus:
+        """POST ``/arm`` with attached pid + session freezes/cheat. No :744 write."""
+        dest = self._resolve_plugin_host(host)
+        pid = self._resolve_pid(None)
+        payload: dict = {
+            "pid": pid,
+            "freezes": [
+                {"addr": entry.addr, "data": entry.data.hex()}
+                for entry in self._freezes.values()
+            ],
+            "cheat": cheat_to_dict(self._cheat) if self._cheat is not None else None,
+            "enabled": self.cheat_enabled_names(),
+        }
+        status = self._plugin_http("POST", "/arm", dest, payload)
+        self._plugin_armed = True
+        return status
+
+    def plugin_disarm(self, host: str | None = None) -> PluginStatus:
+        """POST ``/disarm``. Does not drop the :744 session."""
+        status = self._plugin_http("POST", "/disarm", host, {})
+        self._plugin_armed = False
+        return status
 
     def _module_base(self, pid: int, process: str) -> int:
         rows = self.maps(pid)
