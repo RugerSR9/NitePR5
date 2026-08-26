@@ -108,7 +108,7 @@ If a First Scan reports too many matches, pick a **less common** in-game value a
 
 ## Plugin daemon
 
-The etaHEN plugin (title **NPR500001**, version **0.40**) owns freeze and cheats when armed so they keep applying with the web UI closed. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
+The etaHEN plugin (title **NTPR50001**, version **0.40**) owns freeze and cheats when armed so they keep applying with the web UI closed. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
 
 | How | Where to download |
 |---|---|

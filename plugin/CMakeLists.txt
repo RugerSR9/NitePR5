@@ -42,7 +42,7 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "[Cc]lang")
     "Use ${PS5_PAYLOAD_SDK}/bin/prospero-cmake.")
 endif()
 
-set(PLUGIN_TITLE_ID "NPR500001")
+set(PLUGIN_TITLE_ID "NTPR50001")
 set(PLUGIN_VERSION "0.40")
 
 set(CMAKE_C_STANDARD 11)
@@ -96,7 +96,7 @@ set_target_properties(nitepr5 PROPERTIES
 add_custom_command(TARGET nitepr5 POST_BUILD
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_plugin.py"
           "$<TARGET_FILE:nitepr5>" "${PLUGIN_TITLE_ID}" "${PLUGIN_VERSION}"
-  COMMENT "Wrapping ELF as etaHEN .plugin (NPR500001 0.40)"
+  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.40)"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   VERBATIM
 )

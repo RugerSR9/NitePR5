@@ -9,7 +9,7 @@ phase_state: code_complete   # not_started | in_progress | code_complete | block
 last_updated: 2026-08-26
 # Phase 4 code_complete: plugin/ source + web Arm/Disarm. No ELF on this Windows PC.
 # GitHub Actions builds nitepr5.plugin (workflow_dispatch artifact or Release asset).
-# Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NPR500001.
+# Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NTPR50001.
 # Hardware exit blocked until a CI .plugin is installed via Toolbox.
 # PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
@@ -68,8 +68,8 @@ last_updated: 2026-08-26
 | 2026-08-25 | orchestrator | Scan-hit jump sent `GET /api/read?addr=-389259952` (JS `addr & ~0xf` ToInt32). Align with modulo; `InvalidAddress` 400; parseGoto no `>>> 0`. pytest 106. |
 | 2026-08-25 | orchestrator | README rewritten as post-Phase 3 product docs (setup, editor loop, caps, cheats). No runtime change. |
 | 2026-08-25 | orchestrator | User confirmed Phase 2+3 hardware exits (CUSA13762 hunt, poke/freeze/cheat). Marked `done`. Phase 4 `not_started`; no `plugin/`. |
-| 2026-08-25 | orchestrator | Phase 4 started. Freeze handoff to plugin; command port 1745; title NPR500001; source-only (no ELF cross-compile). Spawn explore, then plugin/, then web bind + tests. |
+| 2026-08-25 | orchestrator | Phase 4 started. Freeze handoff to plugin; command port 1745; title NTPR50001; source-only (no ELF cross-compile). Spawn explore, then plugin/, then web bind + tests. |
 | 2026-08-25 | orchestrator | Wave 0 explore done: `.plugin` header, utility_daemon CMake, POSIX :1745, classic notify, vendor cJSON. Spawn Wave 1 `plugin/` C (no compile). |
-| 2026-08-25 | orchestrator | Wave 1 `plugin/` source in (NPR500001, :1745, two-phase PROC_WRITE). No ELF. Spawn Wave 2 web bind + tests (disjoint paths). |
+| 2026-08-25 | orchestrator | Wave 1 `plugin/` source in (NTPR50001, :1745, two-phase PROC_WRITE). No ELF. Spawn Wave 2 web bind + tests (disjoint paths). |
 | 2026-08-25 | orchestrator | Wave 2 merged: Session `plugin_arm`/`disarm`, Hold Arm/Disarm, mock HTTP :1745. `code_complete`. Hardware blocked on SDK ELF. |
 | 2026-08-26 | orchestrator | Plugin CI: `.github/workflows/plugin.yml` (Run workflow artifact + Release asset). `plugin/build.sh` + Johns SDK. No toolchain on this PC. |

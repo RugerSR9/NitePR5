@@ -152,7 +152,7 @@ After core methods exist, **parallel** four workers on **different files**:
 
 ```text
 Job: etaHEN plugin daemon. Freeze/cheats with no overlay.
-Allowed: create plugin/ now. C, ps5-payload-sdk, etaHEN plugin CMake. Title ID like NPR500001.
+Allowed: create plugin/ now. C, ps5-payload-sdk, etaHEN plugin CMake. Title ID like NTPR50001.
 Talk to 127.0.0.1:744 or a thin command channel from the PC. Notifications only (backend B1).
 Forbidden: ShellUI hooks, game PRX, pad steal, overlay/.
 Exit: plugin on from Toolbox; freeze/cheat still applies with the web UI closed.
