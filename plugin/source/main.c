@@ -58,12 +58,19 @@ int main(void)
 
     notify_start();
 
-    if (dbg_connect() == 0) {
-        st->dbg = 1;
-        notify_dbg_recovered();
+    /* Do not hold 127.0.0.1:744 while idle. A second debugger client plus
+     * TS_RESCAN_ALIASING on the PC scan connection hangs the next PROC_READ
+     * after a few Next Scans. Connect only when armed (or freeze_tick). */
+    if (st->armed) {
+        if (dbg_connect() == 0) {
+            st->dbg = 1;
+            notify_dbg_recovered();
+        } else {
+            st->dbg = 0;
+            notify_dbg_missing();
+        }
     } else {
         st->dbg = 0;
-        notify_dbg_missing();
     }
 
     if (st->armed) {

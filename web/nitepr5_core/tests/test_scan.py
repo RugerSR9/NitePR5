@@ -126,7 +126,7 @@ def test_next_scan_changed_increased_decreased_exact(
     assert session.scan_next(compare="exact", value=100) == 2
     addrs = {h.addr for h in session.scan_results(256)}
     assert addrs == {MockTransport.WRITABLE_EBOOT_ADDR, MockTransport.HEAP_C}
-    assert transport.last_rescan_aliasing is True
+    assert transport.last_rescan_aliasing is False
 
 
 def test_undo_restores_previous_count_and_results(
@@ -381,3 +381,10 @@ def test_read_fails_fast_when_scan_busy(
         session._end_busy()
     peephole = session.read(MockTransport.EBOOT_PID, MockTransport.RAM_BASE, 16)
     assert len(peephole) == 16
+
+
+def test_count_resident_does_not_set_rescan_aliasing() -> None:
+    """TS_RESCAN_ALIASING plus a second :744 client hangs the next PROC_READ."""
+    src = inspect.getsource(Ps5dbgTransport.scan_count_resident)
+    assert "TS_RESCAN_ALIASING" not in src
+    assert "_scan_sync" in src

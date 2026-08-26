@@ -13,10 +13,8 @@ def is_valid_version(version):
 
 
 def is_valid_tid(tid):
-    # etaHEN-Plugins: 4 letters + 5 digits. Locked NitePR5 title NPR500001 is 3+6.
-    if re.match(r"^[A-Za-z]{4}\d{5}$", tid):
-        return True
-    return tid == "NPR500001"
+    # etaHEN: 4 letters + 5 digits. Locked NitePR5 title NTPR50001 matches.
+    return re.match(r"^[A-Za-z]{4}\d{5}$", tid) is not None
 
 
 def add_header_to_elf(elf_filename, tid, version):

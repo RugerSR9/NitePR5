@@ -6,7 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 
-#define NITEPR5_TITLE_ID "NPR500001"
+#define NITEPR5_TITLE_ID "NTPR50001"
 #define NITEPR5_VERSION  "0.40"
 #define NITEPR5_BASENAME "nitepr5"
 

@@ -330,6 +330,17 @@ class Ps5dbgTransport(Transport):
             except OSError:
                 pass
 
+    def _scan_sync(self) -> None:
+        """PROC_NOP after turbo START/COUNT, with the normal 10s timeout.
+
+        COUNT can reply SUCCESS while the command thread is still tearing
+        down aliasing. The next PROC_READ then waits 10s for a 4-byte status
+        and we drop the socket (live: scan/next 200, then hex 409).
+        """
+        from ps5dbg.protocol import proc_nop
+
+        self._call(proc_nop, self._scan_conn())
+
     def _lost(self, exc: BaseException) -> NoReturn:
         """Drop the dead :744 client. Leaving it connected hangs every later I/O."""
         self.disconnect()
@@ -478,7 +489,12 @@ class Ps5dbgTransport(Transport):
             raise ScanUnsupported("no segments to scan")
         conn = self._scan_conn()
         use_aliasing = bool(engines & TSE_ALIASING)
-        self._rescan_aliasing = bool(engines & TSE_RESCAN_ALIASING)
+        # Never TS_RESCAN_ALIASING on COUNT. PROTOCOL: one connection only;
+        # the etaHEN plugin also opens 127.0.0.1:744. Live 2026-08-26: Next
+        # Scan returned 200 then GET /api/read timed out on the 4-byte status.
+        self._rescan_aliasing = False
+        accepted = False
+        count = 0
         try:
             with self.scan_wait():
                 if unknown:
@@ -495,45 +511,52 @@ class Ps5dbgTransport(Transport):
                         use_aliasing=use_aliasing,
                     )
                     self._turbo_open = True
-                    return True, count
-                if not (engines & TSE_SERVER_RESIDENT):
-                    return False, 0
+                    accepted = True
+                elif not (engines & TSE_SERVER_RESIDENT):
+                    accepted = False
+                    count = 0
                 # Always segmented, even for one range. Single-range resident
                 # overflow streams the full hit list (desync if drained as
                 # u64s). Segmented overflow is an empty sentinel only.
-                if not (engines & TSE_SNAPSHOT_SEGMENTS) and len(segments) != 1:
-                    return False, 0
-                if engines & TSE_SNAPSHOT_SEGMENTS:
-                    stored, count = turbo_start_resident_segments(
-                        conn,
-                        pid,
-                        segments,
-                        value_type,
-                        compare_type,
-                        alignment,
-                        value,
-                        use_aliasing=use_aliasing,
-                    )
+                elif not (engines & TSE_SNAPSHOT_SEGMENTS) and len(segments) != 1:
+                    accepted = False
+                    count = 0
                 else:
-                    addr, length = segments[0]
-                    flags = ts.TS_SERVER_RESIDENT
-                    if use_aliasing:
-                        flags |= ts.TS_USE_ALIASING
-                    stored, count = ts.turboscan_start_resident(
-                        conn,
-                        pid,
-                        addr,
-                        length,
-                        value_type,
-                        compare_type,
-                        alignment,
-                        value,
-                        flags=flags,
-                    )
-                if stored == 0:
-                    return False, count
-                self._turbo_open = True
-                return True, count
+                    if engines & TSE_SNAPSHOT_SEGMENTS:
+                        stored, count = turbo_start_resident_segments(
+                            conn,
+                            pid,
+                            segments,
+                            value_type,
+                            compare_type,
+                            alignment,
+                            value,
+                            use_aliasing=use_aliasing,
+                        )
+                    else:
+                        addr, length = segments[0]
+                        flags = ts.TS_SERVER_RESIDENT
+                        if use_aliasing:
+                            flags |= ts.TS_USE_ALIASING
+                        stored, count = ts.turboscan_start_resident(
+                            conn,
+                            pid,
+                            addr,
+                            length,
+                            value_type,
+                            compare_type,
+                            alignment,
+                            value,
+                            flags=flags,
+                        )
+                    if stored == 0:
+                        accepted = False
+                    else:
+                        self._turbo_open = True
+                        accepted = True
+            if accepted:
+                self._scan_sync()
+            return accepted, count
         except ScanUnsupported:
             try:
                 self.scan_end()
@@ -558,10 +581,8 @@ class Ps5dbgTransport(Transport):
 
         conn = self._scan_conn()
         flags = ts.TS_SERVER_RESIDENT
-        if self._rescan_aliasing:
-            flags |= ts.TS_RESCAN_ALIASING
         with self.scan_wait():
-            return self._call(
+            count = self._call(
                 ts.turboscan_count_resident,
                 conn,
                 value_type,
@@ -569,6 +590,8 @@ class Ps5dbgTransport(Transport):
                 value,
                 flags=flags,
             )
+        self._scan_sync()
+        return count
 
     def scan_get_resident(
         self,
@@ -973,7 +996,7 @@ class MockTransport(Transport):
         if not self._scan_authed:
             raise ScanUnsupported("scan authenticate(flags=2) required before stateful scan")
         self.last_use_aliasing = bool(engines & TSE_ALIASING)
-        self._rescan_aliasing = bool(engines & TSE_RESCAN_ALIASING)
+        self._rescan_aliasing = False
         if self.decline_resident and not unknown:
             return False, 0
         if self.decline_snapshot and unknown:

@@ -6,14 +6,14 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ---
 
-## Next orchestrator — start here (2026-08-25)
+## Next orchestrator — start here (2026-08-26)
 
-Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–3. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
+Phases **0–4 are `done`** on hardware. Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
 
 | Fact | Value |
 |---|---|
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
-| Phase 4 | `code_complete` — `plugin/` source + web Arm/Disarm; `.plugin` from GitHub Actions |
+| Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
 | Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
 
@@ -22,7 +22,7 @@ Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not 
 Paste into every Phase 4 worker brief.
 
 - **Handoff:** when the plugin is armed, **it owns freeze**. Web **stops** `POST /api/freeze/tick`. Scan / hex / watch stay on the PC (`:744` LAN). Plugin writes via **`127.0.0.1:744`**.
-- **Title** `NPR500001`, version `0.40`. **Command port 1745** (HTTP, JSON). Not 744 / 9021 / 9028 / 9999 / 1744.
+- **Title** `NTPR50001` (`^[A-Za-z]{4}\d{5}$`), version `0.40`. **Command port 1745** (HTTP, JSON). Not 744 / 9021 / 9028 / 9999 / 1744. Do not use `NPR500001` (3 letters + 6 digits — etaHEN will not load it).
 - **Caps:** freeze ≤32, data 1–8 bytes, tick 15 Hz. 33rd freeze → refuse. Cheat toggle uses GoldHEN `on`/`off` at `module_base+offset`. `executable` maps count as `eboot.bin`.
 - **PROC_WRITE:** two-phase only (16-byte `<IQI` pid, addr, length LE → ACK → payload → FINAL). Never pack payload into `datalen`.
 - **Persist:** `/data/nitepr5/state.json` + cheats in `/data/nitepr5/cheats/`. Never `/data/etaHEN/cheats/`.
@@ -43,8 +43,8 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### Phase 4 SDK facts (explore 2026-08-25)
 
-- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`plugin/scripts/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$` (NPR500001 is extra-allowed), version `^\d\.\d{2}$`. CI: `.github/workflows/plugin.yml`.
-- CMake: copy **utility_daemon** (not Injector / Error_Disabling). `PLUGIN_TITLE_ID NPR500001`, `PLUGIN_VERSION 0.40`, basename `nitepr5`. Link `SceLibcInternal SceSystemService SceNet SceSysmodule SceUserService SceNetCtl kernel_sys`. **No** `hijacker`, **no** `ScePad`.
+- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`plugin/scripts/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$`, version `^\d\.\d{2}$`. Locked **NTPR50001**. CI: `.github/workflows/plugin.yml`.
+- CMake: copy **utility_daemon** (not Injector / Error_Disabling). `PLUGIN_TITLE_ID NTPR50001`, `PLUGIN_VERSION 0.40`, basename `nitepr5`. Link `SceLibcInternal SceSystemService SceNet SceSysmodule SceUserService SceNetCtl kernel_sys`. **No** `hijacker`, **no** `ScePad`.
 - Notify: classic `notify_request` `{char useless1[45]; char message[3075];}` + `sceKernelSendNotificationRequest(0,&req,sizeof req,0)`. Do not use libhijacker `printf_notification`.
 - Sockets: **POSIX** `socket/bind/listen/accept` on `0.0.0.0:1745` (utility_daemon `tcp.c`). Not sceHttp2.
 - JSON: vendor MIT **cJSON 1.7.17** to `plugin/third_party/cjson/`. Plugins are already jailbroken; **no 9028**. `mkdir` `/data/nitepr5/` is OK.
@@ -53,13 +53,13 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. Hardware exit: GitHub Actions → **Plugin** → **Run workflow** (or a Release) → download `nitepr5.plugin` → copy to `/data/etaHEN/plugins` or USB `etaHEN/plugins` → Toolbox enable **NPR500001** → web Arm plugin on CUSA13762 → **close the browser** — freeze/cheat still applies. If Toolbox rejects the TID, ask before changing to `NITE00001`. Do not send the file to elfldr **9021**.
+Phase 4 is **`done`**. Do **not** start Phase 5 unless the user asks. **NTPR50001** loads (startup toast). Freeze: a web poke is overwritten by the plugin tick (user 2026-08-26). Do not send the file to elfldr **9021**.
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NPR500001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
+`plugin/` exists. Title NTPR50001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
 
-`make_plugin.py` accepts **NPR500001** as an extra TID (stock etaHEN regex is 4 letters + 5 digits; this ID is 3+6). If Toolbox refuses the plugin, try `NITE00001` later — do not change the locked ID unless the user says so.
+`make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
 
 Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`.
 
@@ -123,7 +123,7 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `code_complete`
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `done`; do not start Phase 5 unless asked
 
 Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this Windows PC (CI is allowed).
 
@@ -348,7 +348,7 @@ Logger `nitepr5` (INFO): `first scan: N rw- segments, X MiB (pcd|maps-fallback)`
 - `authenticate(flags=2)` before stateful scan (`scan_caps` does not need auth)
 - Caps → cheap region classify (`probe_bytes=1`) → `turboscan_start_resident` (one range) or **segment gap-fill**
 - Multi-segment: flags `TS_SERVER_RESIDENT | TS_SNAPSHOT_SEGMENTS` plus **`TS_USE_ALIASING` when `TSE_ALIASING` is advertised** (`TS_SNAPSHOT` **clear**; never `TS_PARALLEL_COMPARE` on resident). After the two value acks, send `u32 count` then `count × {u64 addr; u32 length}` (12 bytes each). Packet address/length ignored. Bound `1 .. 1048576`. Reply `{u32 resident_stored; u64 count}`. `resident_stored==0` → declined. Implemented in `scan.turbo_start_resident_segments` using `ps5dbg.turboscan` packing + `Cmd` + `connection` — **no new opcodes**. `turboscan_start_resident` in ps5dbg 0.1.1 does **not** send this list.
-- Next: `turboscan_count_resident` with **`TS_RESCAN_ALIASING` when advertised** (progress is a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**)
+- Next: `turboscan_count_resident` **without** `TS_RESCAN_ALIASING` (progress is still a stream of `u64` until `0xFFFFFFFFFFFFFFFF` — **8-byte recvs**). Then `PROC_NOP` with the normal 10s timeout before hex/watch resume. Do not OR rescan-aliasing: the plugin (or any second :744 client) over-subscribes it; live Next Scan 200 then peephole `timed out reading 4 bytes`.
 - Results: `turboscan_get_resident` only if `count ≤ 256`
 - Unknown: `TS_SNAPSHOT | TS_SNAPSHOT_SEGMENTS | TS_SERVER_RESIDENT` (+ aliasing if advertised). Drain plan/progress/summary; never download RAM. No iterative fallback for unknown → `ScanUnsupported`. ps5dbg raises `NotImplementedError` if you pass `TS_SNAPSHOT` into `turboscan_start_resident`; use `turbo_start_snapshot_segments`.
 - Fallback **only if turbo caps are missing**: `protocol.proc_scan_start/count/get` (client-held candidates, still ≤256 rows out). If turbo exists but `resident_stored==0` on an exact first scan, **retry snapshot + exact COUNT** (bitmap stays on the console; common values overflow the 256 MiB match list). If snapshot is missing or declined → `ScanUnsupported`. Never stream the hit list. Unknown never uses iterative.
@@ -542,5 +542,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 4 hardware | Install CI-built `nitepr5.plugin` via Toolbox; confirm freeze with web UI closed |
 | 5 | Overlay spike B2 **or** B3 |

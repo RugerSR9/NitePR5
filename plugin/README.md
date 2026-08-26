@@ -2,7 +2,7 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NPR500001**, version **0.40**, basename **nitepr5**
+- Title ID **NTPR50001**, version **0.40**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI)
 - Game writes go through **127.0.0.1:744** (ps5debug-NG). Two-phase `PROC_WRITE` only.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`)
@@ -16,7 +16,7 @@ Do **not** send this file to elfldr **9021** (that port is for one-shot ELFs lik
 2. Copy it to:
    - USB: `<usb>/etaHEN/plugins/` (priority), or
    - Internal: `/data/etaHEN/plugins/`
-3. Enable or **kill then run** from the etaHEN Toolbox (title **NPR500001**).
+3. Enable or **kill then run** from the etaHEN Toolbox (title **NTPR50001**).
 
 Plugins are already jailbroken; do not call IPC 9028.
 
