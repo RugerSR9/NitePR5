@@ -8,14 +8,60 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-25)
 
-Phases **0–3 are `done`** on hardware (user 2026-08-25). Next implementation target is **Phase 4** (etaHEN plugin daemon). Do not create `plugin/` until that phase starts. Do not create `overlay/` until Phase 5. Do not re-implement Phases 0–3.
+Phases **0–3 are `done`** on hardware. **Phase 4 is `code_complete`.** Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–3. **No PS5 ELF cross-compile** on this Windows PC.
 
 | Fact | Value |
 |---|---|
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
-| Phase 4 | `not_started` — spawn ORCHESTRATION Phase 4 playbook when the user asks |
-| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **106 passed** (2026-08-25 VA-align + tracing) |
+| Phase 4 | `code_complete` — `plugin/` source + web Arm/Disarm; hardware exit waits on `.plugin` |
+| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
 | Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
+
+### Phase 4 locked contract (user 2026-08-25)
+
+Paste into every Phase 4 worker brief.
+
+- **Handoff:** when the plugin is armed, **it owns freeze**. Web **stops** `POST /api/freeze/tick`. Scan / hex / watch stay on the PC (`:744` LAN). Plugin writes via **`127.0.0.1:744`**.
+- **Title** `NPR500001`, version `0.40`. **Command port 1745** (HTTP, JSON). Not 744 / 9021 / 9028 / 9999 / 1744.
+- **Caps:** freeze ≤32, data 1–8 bytes, tick 15 Hz. 33rd freeze → refuse. Cheat toggle uses GoldHEN `on`/`off` at `module_base+offset`. `executable` maps count as `eboot.bin`.
+- **PROC_WRITE:** two-phase only (16-byte `<IQI` pid, addr, length LE → ACK → payload → FINAL). Never pack payload into `datalen`.
+- **Persist:** `/data/nitepr5/state.json` + cheats in `/data/nitepr5/cheats/`. Never `/data/etaHEN/cheats/`.
+- **Notify (B1):** toast on start / armed / `:744` missing. No ShellUI, no game PRX, no pad, no `libhijacker` into the title.
+- **No ELF build here.** Do not install a PS5 toolchain, WSL, Docker, or CI compile.
+
+**Command channel (plugin listens on LAN :1745):**
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/status` | `{ok, armed, pid, freeze_count, cheat_id, enabled:[str], dbg:bool}` |
+| POST | `/arm` | `{pid, freezes:[{addr, data}], cheat?: GoldHEN object, enabled?:[str]}` → `{ok, armed:true, freeze_count}` — `data` hex; max 32; persist state |
+| POST | `/disarm` | `{ok, armed:false}` — stop freeze tick; keep files |
+| POST | `/cheat/toggle` | `{name, enabled}` → `{ok, name, enabled}` |
+| POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
+
+Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty freeze list + no cheat is a valid disarm-equivalent arm.
+
+### Phase 4 SDK facts (explore 2026-08-25)
+
+- Install: USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`. Toolbox kill/run. File is **`.plugin`** = `etaHEN_PLUGIN\0TID\0version\0` + ELF (`lib/make_plugin.py`). TID `^[A-Za-z]{4}\d{5}$`, version `^\d\.\d{2}$`.
+- CMake: copy **utility_daemon** (not Injector / Error_Disabling). `PLUGIN_TITLE_ID NPR500001`, `PLUGIN_VERSION 0.40`, basename `nitepr5`. Link `SceLibcInternal SceSystemService SceNet SceSysmodule SceUserService SceNetCtl kernel_sys`. **No** `hijacker`, **no** `ScePad`.
+- Notify: classic `notify_request` `{char useless1[45]; char message[3075];}` + `sceKernelSendNotificationRequest(0,&req,sizeof req,0)`. Do not use libhijacker `printf_notification`.
+- Sockets: **POSIX** `socket/bind/listen/accept` on `0.0.0.0:1745` (utility_daemon `tcp.c`). Not sceHttp2.
+- JSON: vendor MIT **cJSON 1.7.17** to `plugin/third_party/cjson/`. Plugins are already jailbroken; **no 9028**. `mkdir` `/data/nitepr5/` is OK.
+- Thin `:744` client (not a protocol fork): header `<III` magic `0xFFAABBCC`, cmd, datalen. Status raw word `SUCCESS=0x80000000` (already bitswapped; do not un-swap). `PROC_WRITE=0xBDAA0003`: send 16-byte `<IQI` pid,addr,len **only** (datalen=16), ACK, then payload, FINAL. Never concatenate payload into the request body. Also: `PROC_LIST=0xBDAA0001`, `PROC_MAPS=0xBDAA0004` (body u32 pid; entries 58 B), `CONSOLE_FOREGROUND_APP=0xBDDD0006` (140 B). No turbo, no `PT_*`, no `PROC_AUTH` unless a write is refused.
+- Do not copy: libhijacker, Game_Plugin_Loader, Plugin_samples/PS5Debug, pad hooks, SDK `sceNotificationSend`.
+
+### What the next agent should do
+
+Phase 4 is **code_complete**. Do **not** start Phase 5 unless the user asks. Hardware exit: build `nitepr5.plugin` with etaHEN-Plugins/SDK **elsewhere**, copy to `/data/etaHEN/plugins` or USB `etaHEN/plugins`, Toolbox enable **NPR500001**, web Arm plugin on CUSA13762, **close the browser** — freeze/cheat still applies. If Toolbox rejects the TID, ask before changing to `NITE00001`.
+
+### Phase 4 plugin tree (Wave 1, source only)
+
+`plugin/` exists. Title NPR500001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. No ELF built here.
+
+`make_plugin.py` accepts **NPR500001** as an extra TID (stock etaHEN regex is 4 letters + 5 digits; this ID is 3+6). If Toolbox refuses the plugin, try `NITE00001` later — do not change the locked ID unless the user says so.
+
+Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`.
 
 ### Last live incident (fixed; hardware re-verified 2026-08-25)
 
@@ -58,11 +104,7 @@ Live: `GET /api/watch/poll` 200, then `NotConnected: timed out reading 4 bytes f
 
 Tests: `test_proc_write_phased_sends_16_byte_packet_then_payload`, `test_ui_pauses_polls_during_poke`.
 
-### What the next agent should do
-
-Phase 4 when the user asks: ORCHESTRATION Phase 4 playbook — **one** worker, `plugin/` C + ps5-payload-sdk + etaHEN CMake. Notifications only (B1). No ShellUI, no game PRX, no `overlay/`.
-
-Until then: do not create `plugin/` or `overlay/`. Keep the web editor as the scanner. Paste Phase 0+1+2+3 blocks into every worker brief.
+Hardware and UI notes (still true):
 
 ```powershell
 python -m pytest web/tests web/nitepr5_core/tests -q
@@ -81,9 +123,9 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 3 is `done`; spawn when the user asks
+5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `in_progress`
 
-Forbidden until Phase 4/5 starts: overlay, plugin, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`.
+Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this PC.
 
 ---
 

@@ -1,0 +1,444 @@
+/* Thin PS5Debug client on 127.0.0.1:744. Subset of ps5dbg 0.1.1 / PROTOCOL.md v1.3.0.
+ * Not a protocol fork. No turbo scan, no PT_ATTACH, no DEBUG_*, no PROC_WRITE_MULTI.
+ */
+
+#include "dbg_client.h"
+#include "nitepr5.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+#define DBG_MAX_COUNT 4096
+
+static int g_fd = -1;
+
+static void put_u32le(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v);
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static void put_u64le(uint8_t *p, uint64_t v)
+{
+    put_u32le(p, (uint32_t)v);
+    put_u32le(p + 4, (uint32_t)(v >> 32));
+}
+
+static uint32_t get_u32le(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static uint64_t get_u64le(const uint8_t *p)
+{
+    return (uint64_t)get_u32le(p) | ((uint64_t)get_u32le(p + 4) << 32);
+}
+
+static int send_all(int fd, const void *buf, size_t n)
+{
+    const uint8_t *p = (const uint8_t *)buf;
+
+    while (n > 0) {
+#ifdef MSG_NOSIGNAL
+        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
+#else
+        ssize_t w = send(fd, p, n, 0);
+#endif
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            return -1;
+        }
+        p += (size_t)w;
+        n -= (size_t)w;
+    }
+    return 0;
+}
+
+static int recv_all(int fd, void *buf, size_t n)
+{
+    uint8_t *p = (uint8_t *)buf;
+
+    while (n > 0) {
+        ssize_t r = recv(fd, p, n, 0);
+        if (r < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (r == 0) {
+            return -1;
+        }
+        p += (size_t)r;
+        n -= (size_t)r;
+    }
+    return 0;
+}
+
+void dbg_disconnect(void)
+{
+    if (g_fd >= 0) {
+        close(g_fd);
+        g_fd = -1;
+    }
+}
+
+int dbg_connected(void)
+{
+    return g_fd >= 0;
+}
+
+static int send_request(uint32_t cmd, const void *body, uint32_t datalen)
+{
+    uint8_t hdr[12];
+
+    if (g_fd < 0) {
+        return -1;
+    }
+    put_u32le(hdr + 0, DBG_MAGIC);
+    put_u32le(hdr + 4, cmd);
+    put_u32le(hdr + 8, datalen);
+    if (send_all(g_fd, hdr, 12) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    if (datalen > 0 && body != NULL) {
+        if (send_all(g_fd, body, datalen) != 0) {
+            dbg_disconnect();
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Success is the raw little-endian word 0x80000000. Do not bitswap. */
+static int read_status(void)
+{
+    uint8_t buf[4];
+    uint32_t st;
+
+    if (g_fd < 0) {
+        return -1;
+    }
+    if (recv_all(g_fd, buf, 4) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    st = get_u32le(buf);
+    if (st != DBG_SUCCESS) {
+        dbg_disconnect();
+        return -1;
+    }
+    return 0;
+}
+
+int dbg_connect(void)
+{
+    int fd;
+    int flags;
+    int rc;
+    int err;
+    socklen_t elen;
+    struct sockaddr_in addr;
+    struct pollfd pfd;
+    struct timeval tv;
+
+    dbg_disconnect();
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+
+#ifdef SO_NOSIGPIPE
+    {
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    }
+#endif
+
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(NITEPR5_DBG_PORT);
+    if (inet_pton(AF_INET, NITEPR5_DBG_HOST, &addr.sin_addr) != 1) {
+        close(fd);
+        return -1;
+    }
+
+    flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        close(fd);
+        return -1;
+    }
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    rc = connect(fd, (struct sockaddr *)&addr, sizeof addr);
+    if (rc < 0 && errno != EINPROGRESS && errno != EINTR) {
+        close(fd);
+        return -1;
+    }
+
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, 1000) <= 0) {
+        close(fd);
+        return -1;
+    }
+
+    err = 0;
+    elen = sizeof err;
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen) < 0 || err != 0) {
+        close(fd);
+        return -1;
+    }
+
+    if (fcntl(fd, F_SETFL, flags) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    memset(&tv, 0, sizeof tv);
+    tv.tv_sec = 2;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+
+    g_fd = fd;
+    return 0;
+}
+
+int dbg_nop(void)
+{
+    if (send_request(PROC_NOP, NULL, 0) != 0) {
+        return -1;
+    }
+    return read_status();
+}
+
+int dbg_proc_write(uint32_t pid, uint64_t addr, const uint8_t *data, uint32_t length)
+{
+    uint8_t packet[DBG_WRITE_PACKET_LEN];
+
+    if (length > 0 && data == NULL) {
+        return -1;
+    }
+
+    /* Phase 1: request body is exactly 16 bytes so datalen 16. Never pack payload here. */
+    memset(packet, 0, sizeof packet);
+    put_u32le(packet + 0, pid);
+    put_u64le(packet + 4, addr);
+    put_u32le(packet + 12, length);
+
+    if (send_request(PROC_WRITE, packet, DBG_WRITE_PACKET_LEN) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+
+    /* Phase 2: payload is a separate send, not concatenated into datalen. */
+    if (length > 0) {
+        if (send_all(g_fd, data, length) != 0) {
+            dbg_disconnect();
+            return -1;
+        }
+    }
+    return read_status();
+}
+
+static int recv_count_then(uint32_t *count, void *entries, uint32_t cap, uint32_t elem)
+{
+    uint8_t nbuf[4];
+    uint32_t n;
+    uint32_t take;
+    uint32_t extra;
+    uint8_t skip[256];
+
+    if (recv_all(g_fd, nbuf, 4) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    n = get_u32le(nbuf);
+    if (n > DBG_MAX_COUNT) {
+        dbg_disconnect();
+        return -1;
+    }
+    take = n;
+    if (take > cap) {
+        take = cap;
+    }
+    if (take > 0 && entries != NULL) {
+        if (recv_all(g_fd, entries, (size_t)take * elem) != 0) {
+            dbg_disconnect();
+            return -1;
+        }
+    }
+    extra = n - take;
+    while (extra > 0) {
+        uint32_t chunk = extra;
+        if (chunk > (uint32_t)(sizeof skip / elem)) {
+            chunk = (uint32_t)(sizeof skip / elem);
+        }
+        if (chunk == 0) {
+            chunk = 1;
+        }
+        if (recv_all(g_fd, skip, (size_t)chunk * elem) != 0) {
+            dbg_disconnect();
+            return -1;
+        }
+        extra -= chunk;
+    }
+    *count = take;
+    return 0;
+}
+
+int dbg_proc_list(void *entries, uint32_t cap, uint32_t *count)
+{
+    if (count == NULL) {
+        return -1;
+    }
+    if (send_request(PROC_LIST, NULL, 0) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    return recv_count_then(count, entries, cap, DBG_PROC_ENTRY_SIZE);
+}
+
+int dbg_proc_maps(uint32_t pid, void *entries, uint32_t cap, uint32_t *count)
+{
+    uint8_t body[4];
+
+    if (count == NULL) {
+        return -1;
+    }
+    put_u32le(body, pid);
+    if (send_request(PROC_MAPS, body, 4) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    return recv_count_then(count, entries, cap, DBG_MAP_ENTRY_SIZE);
+}
+
+int dbg_proc_info(uint32_t pid, void *out188)
+{
+    uint8_t body[4];
+
+    if (out188 == NULL) {
+        return -1;
+    }
+    put_u32le(body, pid);
+    if (send_request(PROC_INFO, body, 4) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    if (recv_all(g_fd, out188, DBG_PROC_INFO_SIZE) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    return 0;
+}
+
+int dbg_foreground(void *out140)
+{
+    if (out140 == NULL) {
+        return -1;
+    }
+    if (send_request(CONSOLE_FOREGROUND_APP, NULL, 0) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    if (recv_all(g_fd, out140, DBG_FOREGROUND_SIZE) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    return 0;
+}
+
+static int map_belongs(const char *map_name, const char *process)
+{
+    const char *base;
+    const char *proc;
+
+    if (map_name == NULL || map_name[0] == 0) {
+        return 0;
+    }
+    proc = (process && process[0]) ? process : EBOOT_NAME;
+    base = nitepr5_basename(map_name);
+    if (strcmp(map_name, proc) == 0 || strcmp(base, proc) == 0) {
+        return 1;
+    }
+    if (nitepr5_ascii_ieq(proc, EBOOT_NAME) && nitepr5_ascii_ieq(base, EXECUTABLE_MAP_NAME)) {
+        return 1;
+    }
+    return 0;
+}
+
+int dbg_module_base(uint32_t pid, const char *process, uint64_t *out_base)
+{
+    uint8_t *buf;
+    uint32_t count = 0;
+    uint32_t i;
+    int found = 0;
+    uint64_t best = 0;
+
+    if (out_base == NULL) {
+        return -1;
+    }
+    buf = (uint8_t *)malloc((size_t)DBG_MAX_COUNT * DBG_MAP_ENTRY_SIZE);
+    if (buf == NULL) {
+        return -1;
+    }
+    if (dbg_proc_maps(pid, buf, DBG_MAX_COUNT, &count) != 0) {
+        free(buf);
+        return -1;
+    }
+    for (i = 0; i < count; i++) {
+        const uint8_t *row = buf + (size_t)i * DBG_MAP_ENTRY_SIZE;
+        char name[33];
+        uint64_t start;
+
+        memcpy(name, row, 32);
+        name[32] = 0;
+        start = get_u64le(row + 32);
+        if (!map_belongs(name, process)) {
+            continue;
+        }
+        if (!found || start < best) {
+            best = start;
+            found = 1;
+        }
+    }
+    free(buf);
+    if (!found) {
+        return -1;
+    }
+    *out_base = best;
+    return 0;
+}

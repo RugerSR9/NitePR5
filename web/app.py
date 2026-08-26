@@ -49,6 +49,9 @@ from nitepr5_core import (
     NoTarget,
     NoWatch,
     NotConnected,
+    PluginError,
+    PluginStatus,
+    PluginUnreachable,
     ProcessInfo,
     ReadTooLarge,
     ResultsTooMany,
@@ -183,6 +186,7 @@ _HTTP_400 = (
     InvalidCheat,
     NoCheat,
     NoMod,
+    PluginError,
 )
 
 
@@ -261,6 +265,18 @@ def _cheat_payload() -> dict:
     }
 
 
+def _plugin_json(status: PluginStatus) -> dict:
+    return {
+        "ok": status.ok,
+        "armed": status.armed,
+        "pid": status.pid,
+        "freeze_count": status.freeze_count,
+        "cheat_id": status.cheat_id,
+        "enabled": list(status.enabled),
+        "dbg": status.dbg,
+    }
+
+
 def _cheat_path(filename: str) -> Path:
     if not isinstance(filename, str):
         raise InvalidCheat(f"invalid cheat filename: {filename!r}")
@@ -278,7 +294,7 @@ def _cheat_path(filename: str) -> Path:
 async def nitepr5_error_handler(_request: Request, exc: NitePR5Error) -> JSONResponse:
     if isinstance(exc, NotConnected):
         status = 409
-    elif isinstance(exc, ConnectFailed):
+    elif isinstance(exc, (ConnectFailed, PluginUnreachable)):
         status = 503
     elif isinstance(exc, _HTTP_400):
         status = 400
@@ -497,6 +513,21 @@ def api_cheat_toggle(body: CheatToggleBody) -> dict:
 @app.get("/api/cheat")
 def api_cheat() -> dict:
     return _cheat_payload()
+
+
+@app.get("/api/plugin/status")
+def api_plugin_status() -> dict:
+    return _plugin_json(SESSION.plugin_status())
+
+
+@app.post("/api/plugin/arm")
+def api_plugin_arm() -> dict:
+    return _plugin_json(SESSION.plugin_arm())
+
+
+@app.post("/api/plugin/disarm")
+def api_plugin_disarm() -> dict:
+    return _plugin_json(SESSION.plugin_disarm())
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")

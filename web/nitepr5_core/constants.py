@@ -5,6 +5,10 @@ from __future__ import annotations
 PS5DEBUG_PORT = 744
 CONNECT_TIMEOUT = 10.0
 
+# etaHEN plugin command HTTP (LAN, same host as connect()). Not 744 / 1744.
+PLUGIN_PORT = 1745
+PLUGIN_HTTP_TIMEOUT = 3.0
+
 # Turbo scan can sit silent for minutes (progress is a u64 every so often, or
 # a 12-byte summary only after all segments). ps5dbg Connection defaults to
 # 10s; that fires ``timed out reading 8 bytes``. Scan I/O waits indefinitely

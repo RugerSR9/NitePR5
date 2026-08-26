@@ -216,3 +216,15 @@ class NoMod(NitePR5Error):
     def __init__(self, name: object) -> None:
         self.name = name
         super().__init__(f"no cheat mod named {name!r}")
+
+
+class PluginUnreachable(NitePR5Error):
+    """Cannot reach the etaHEN plugin HTTP command port (TCP 1745)."""
+
+
+class PluginError(NitePR5Error):
+    """Plugin HTTP 400. ``error`` is the JSON ``error`` field when present."""
+
+    def __init__(self, message: str, *, error: str | None = None) -> None:
+        self.error = error if error is not None else message
+        super().__init__(message)

@@ -132,3 +132,16 @@ class CheatFile:
     process: str
     mods: list[CheatMod]
     credits: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class PluginStatus:
+    """etaHEN plugin HTTP /status (and arm/disarm) JSON."""
+
+    ok: bool
+    armed: bool
+    pid: int
+    freeze_count: int
+    cheat_id: str
+    enabled: list[str]
+    dbg: bool

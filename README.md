@@ -2,7 +2,7 @@
 
 Homebrew memory editor for a jailbroken PS5 (firmware **9.60**, **etaHEN**, **ps5debug-NG**). Named after PSP **NitePR**: search, hex-edit, freeze, and save cheats while a game runs.
 
-The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. An etaHEN plugin and in-game overlay come later — they are not in this tree.
+The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. Phase 4 plugin **source** is in `plugin/` (no ELF on this PC). Overlay is still later.
 
 **Humans:** this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Progress: [docs/STATUS.md](docs/STATUS.md). **Agents:** start at [AGENTS.md](AGENTS.md) and [docs/HANDOFF.md](docs/HANDOFF.md).
 
@@ -10,7 +10,7 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 Phases 0–3 are **done**. The web UI is the shippable PC editor: connect, scan, poke, watch, freeze, and load/save GoldHEN JSON on hardware (**CUSA13762**).
 
-Phase 4 (`plugin/`) is next and has not started. After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phase 4 is **code_complete** (source + web bind + mocks). Hardware exit waits on an SDK-built `.plugin`. After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -124,7 +124,7 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 | 1 Connect + peephole | done | Web UI reads 512 live bytes |
 | 2 Scan loop | done | Turbo scan on-console; CUSA13762 hunt passed |
 | 3 Hex, poke, freeze, JSON | done | First usable product; poke/freeze/cheat passed on hardware |
-| 4 Plugin daemon | not started | Freezes/cheats on-console with no overlay |
+| 4 Plugin daemon | code_complete | Freezes/cheats on-console with no overlay; ELF not built here |
 | 5 Overlay spike | not started | See-through TV panel (one backend) |
 | 6 Backlog | parked | Shared sessions, pointer/AOB, etc. — only if asked |
 
@@ -136,5 +136,5 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 - Assume an etaHEN plugin can draw the system overlay — it cannot
 - Dump or poll all of game RAM
 - Enable `PT_ATTACH` / pause-the-game from this product
-- Create `plugin/` or `overlay/` before those phases
+- Create `overlay/` before Phase 5
 - Use this online or on hardware you do not own
