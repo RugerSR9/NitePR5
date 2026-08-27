@@ -8,14 +8,14 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-26)
 
-Phases **0–4 are `done`** on hardware. Do not create `overlay/` or start Phase 5 until the user asks. Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions (Release + **Run workflow**) builds `nitepr5.plugin`.
+Phases **0–4 are `done`** on hardware. **Phase 5 is `code_complete` (B3)** — hardware exit not run. Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions builds `nitepr5.plugin` and `overlay.elf`.
 
 | Fact | Value |
 |---|---|
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
 | Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
-| Git | Phase 1 on `main` (PR #1). Later work may be **uncommitted**. **Commit only if the user asks.** |
+| Phase 5 | **B3** `code_complete`. Plugin 0.50 + `overlay/` ELF. Hardware exit not run. |
 
 ### Phase 4 locked contract (user 2026-08-25)
 
@@ -53,15 +53,33 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **`done`**. Do **not** start Phase 5 unless the user asks. **NTPR50001** loads (startup toast). Freeze: a web poke is overwritten by the plugin tick (user 2026-08-26). Do not send the file to elfldr **9021**.
+Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.50** + `overlay/` Johns SDK ELF. CI: `nitepr5.plugin` and `overlay.elf`. Do not send either to elfldr **9021** (overlay inject is NineS **:9033** into `eboot.bin`).
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NTPR50001 / 0.40. HTTP :1745. Two-phase PROC_WRITE to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
+`plugin/` exists. Title NTPR50001 / **0.50**. HTTP :1745. Two-phase PROC_WRITE + one-phase PROC_READ to 127.0.0.1:744. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
 
 `make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
 
 Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`.
+
+### Phase 5 Wave 0 (explore 2026-08-26) — paste into Phase 5 workers
+
+User: full on-TV editor (Live / Watch / Freeze / Cheats / related views). No turbo scan on TV. Overlay talks to plugin `:1745` only — **never a second `:744`**. **Backend locked B3** (user 2026-08-26). B2 is dead.
+
+| Backend | Verdict |
+|---|---|
+| **B2** ShellUI PUI | **NO-GO.** Overlay Labels + DualSense shortcuts are Toolbox-in-`SceShellUI` only. No plugin PUI API. Fork required. |
+| **B3** in-game ELF | **GO with caveats.** Inject + GNM flip tick + pad PLT exist. `fps_elf` only toasts FPS; translucent multi-view HUD is **greenfield**. |
+| Plugin I/O | **GO.** `PROC_READ=0xBDAA0002` one-phase (`<IQI` pid,addr,len → SUCCESS → `length` bytes). Not two-phase. Cap `n` 1..4096. |
+
+**B3 spike shape (if user confirms):** `overlay/` = Johns SDK ELF (fps_elf-shaped), deploy `/data/nitepr5/overlay.elf`. Inject via NineS/`Inject_Toolbox`/separate loader — **do not** steal `scePadReadState` PLT if etaHEN FPS already did (HookGame fights). Draw+pad in the ELF; hijacker only in the loader. Memory path: HTTP `127.0.0.1:1745` → NTPR50001 → `:744`. In-process game `memcpy` **forbidden**. Combo: L1+R1+Touchpad open/close; Cross commit; Circle cancel. Leave ShellUI shortcuts alone.
+
+**Kill B3 if:** inject fails on CUSA13762; flip never fires; ELF cannot connect `:1745`; no readable translucent panel in the spike budget.
+
+**Wave 2 overlay (source 2026-08-26):** `overlay/` fps_elf-shaped ELF (not `.plugin`). HTTP client **127.0.0.1:1745** only. GNM flip tick + VideoOut buffer composite (translucent panel). DualSense: L1+R1+Touchpad open/close; Cross poke confirm; Circle cancel. Views Live/Watch/Freeze/Cheats. Freeze tick stays in the plugin. Inject: `/data/nitepr5/overlay.elf` into `eboot.bin` via Injector/NineS **:9033**. Kill if HUD blank (buffers registered before inject) or `:1745` blocked.
+
+**Wave 1 plugin `:1745` (implemented 2026-08-26, version 0.50):** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. `POST /disarm` keeps `:744` if overlay open. Session web API unchanged. Overlay open must happen **before** `/foreground`/`/read` (plugin `require_dbg`). Injected ELF should `POST /overlay/open` with `getpid()`.
 
 ### Last live incident (fixed; hardware re-verified 2026-08-25)
 
@@ -123,9 +141,9 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 4 playbook — Phase 4 is `done`; do not start Phase 5 unless asked
+5. `docs/ORCHESTRATION.md` Phase 5 — B3 source complete; hardware exit is the user’s inject + poke
 
-Forbidden: overlay, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, ELF cross-compile on this Windows PC (CI is allowed).
+Forbidden: B2+B3 together, pointer/AOB/disasm, unbounded polling, `PT_ATTACH`, second `:744` from overlay, ELF cross-compile on this Windows PC (CI is allowed).
 
 ---
 
@@ -542,4 +560,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 5 | Overlay spike B2 **or** B3 |
+| 5 | **B3** `code_complete`. Hardware: inject overlay.elf into CUSA13762; poke one value. |

@@ -1,5 +1,6 @@
-/* NitePR5 etaHEN plugin daemon (Phase 4). Freeze/cheats on-console; no overlay.
- * Already jailbroken — do not call IPC 9028. Writes only via 127.0.0.1:744.
+/* NitePR5 etaHEN plugin daemon. Freeze/cheats on-console; Wave 1 I/O for a
+ * future B3 overlay. Already jailbroken — do not call IPC 9028. Writes only
+ * via 127.0.0.1:744. No ShellUI, no pad, no libhijacker.
  */
 
 #include "nitepr5.h"
@@ -52,15 +53,18 @@ int main(void)
     nitepr5_state_t *st = nitepr5_state();
 
     memset(st, 0, sizeof *st);
+    st->next_watch_id = 1;
+    st->next_freeze_id = 1;
     net_init();
     (void)fs_mkdirs();
     (void)fs_state_load();
 
     notify_start();
 
-    /* Do not hold 127.0.0.1:744 while idle. A second debugger client plus
-     * TS_RESCAN_ALIASING on the PC scan connection hangs the next PROC_READ
-     * after a few Next Scans. Connect only when armed (or freeze_tick). */
+    /* Do not hold 127.0.0.1:744 while idle. overlay_open is 0 after boot even
+     * if state.json is armed — only armed reconnects here. A second debugger
+     * client plus TS_RESCAN_ALIASING on the PC scan connection hangs the next
+     * PROC_READ after a few Next Scans. Connect when armed or overlay/open. */
     if (st->armed) {
         if (dbg_connect() == 0) {
             st->dbg = 1;

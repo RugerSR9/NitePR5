@@ -5,9 +5,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+#include <stdlib.h>
 
 #define NITEPR5_TITLE_ID "NTPR50001"
-#define NITEPR5_VERSION  "0.40"
+#define NITEPR5_VERSION  "0.50"
 #define NITEPR5_BASENAME "nitepr5"
 
 #define NITEPR5_HTTP_PORT 1745
@@ -17,6 +19,12 @@
 #define FREEZE_MAX      32
 #define FREEZE_DATA_MAX 8
 #define POLL_TIMEOUT_MS 67 /* ~15 Hz freeze cadence */
+
+#define WATCH_MAX            64
+#define WATCH_LABEL_LEN      64
+#define READ_MAX             4096u
+#define WRITE_MAX            4096u
+#define HEX_PEEPHOLE_DEFAULT 512u
 
 #define ENABLED_MAX     64
 #define NAME_LEN        128
@@ -36,10 +44,18 @@
 #define EXECUTABLE_MAP_NAME "executable"
 
 typedef struct {
+    uint32_t id; /* RAM only; not persisted in state.json */
     uint64_t addr;
     uint8_t data[FREEZE_DATA_MAX];
     uint8_t n;
 } freeze_entry_t;
+
+typedef struct {
+    uint32_t id;
+    uint64_t addr;
+    uint8_t n;
+    char label[WATCH_LABEL_LEN];
+} watch_entry_t;
 
 typedef struct {
     uint64_t offset;
@@ -68,10 +84,15 @@ typedef struct {
 
 typedef struct {
     int armed;
+    int overlay_open; /* RAM only; never state.json; not an armed flag */
     int dbg;
     uint32_t pid;
     int freeze_count;
+    uint32_t next_freeze_id;
     freeze_entry_t freezes[FREEZE_MAX];
+    int watch_count;
+    uint32_t next_watch_id;
+    watch_entry_t watches[WATCH_MAX];
     int enabled_count;
     char enabled[ENABLED_MAX][NAME_LEN];
     cheat_file_t cheat;
@@ -190,6 +211,53 @@ static inline int nitepr5_ascii_ieq(const char *a, const char *b)
         }
     }
     return *a == 0 && *b == 0;
+}
+
+/* Decimal u64 (strtoull). Query addr and JSON integer text. */
+static inline int nitepr5_parse_u64(const char *s, uint64_t *out)
+{
+    char *end = NULL;
+    unsigned long long v;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+    if (*s == 0 || *s == '-') {
+        return -1;
+    }
+    errno = 0;
+    v = strtoull(s, &end, 10);
+    if (errno == ERANGE || end == s) {
+        return -1;
+    }
+    while (*end == ' ' || *end == '\t') {
+        end++;
+    }
+    if (*end != 0) {
+        return -1;
+    }
+    *out = (uint64_t)v;
+    return 0;
+}
+
+static inline void nitepr5_copy_str(char *dst, size_t cap, const char *src)
+{
+    size_t i;
+
+    if (dst == NULL || cap == 0) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = 0;
+        return;
+    }
+    for (i = 0; i + 1 < cap && src[i]; i++) {
+        dst[i] = src[i];
+    }
+    dst[i] = 0;
 }
 
 static inline const char *nitepr5_basename(const char *name)

@@ -105,6 +105,37 @@ int fs_write_file(const char *path, const void *data, size_t n)
     return w == n ? 0 : -1;
 }
 
+static int json_u64(cJSON *item, uint64_t *out)
+{
+    char *printed;
+    char *end;
+    unsigned long long v;
+
+    if (item == NULL || out == NULL) {
+        return -1;
+    }
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        return nitepr5_parse_u64(item->valuestring, out);
+    }
+    if (!cJSON_IsNumber(item) || item->valuedouble < 0) {
+        return -1;
+    }
+    printed = cJSON_PrintUnformatted(item);
+    if (printed != NULL) {
+        errno = 0;
+        end = NULL;
+        v = strtoull(printed, &end, 10);
+        if (errno != ERANGE && end != printed && *end == 0) {
+            cJSON_free(printed);
+            *out = (uint64_t)v;
+            return 0;
+        }
+        cJSON_free(printed);
+    }
+    *out = (uint64_t)item->valuedouble;
+    return 0;
+}
+
 static void add_u64(cJSON *obj, const char *key, uint64_t v)
 {
     char num[32];
@@ -206,16 +237,17 @@ int fs_state_load(void)
             cJSON *addr;
             cJSON *data;
             size_t dn = 0;
+            uint64_t va = 0;
 
             if (!cJSON_IsObject(row)) {
                 continue;
             }
             addr = cJSON_GetObjectItemCaseSensitive(row, "addr");
             data = cJSON_GetObjectItemCaseSensitive(row, "data");
-            if (!cJSON_IsNumber(addr) || !cJSON_IsString(data)) {
+            if (addr == NULL || !cJSON_IsString(data)) {
                 continue;
             }
-            if (addr->valuedouble < 0) {
+            if (json_u64(addr, &va) != 0) {
                 continue;
             }
             if (nitepr5_parse_hex(data->valuestring, st->freezes[st->freeze_count].data,
@@ -223,11 +255,17 @@ int fs_state_load(void)
                 dn < 1 || dn > FREEZE_DATA_MAX) {
                 continue;
             }
-            st->freezes[st->freeze_count].addr = (uint64_t)addr->valuedouble;
+            st->freezes[st->freeze_count].id = (uint32_t)(st->freeze_count + 1);
+            st->freezes[st->freeze_count].addr = va;
             st->freezes[st->freeze_count].n = (uint8_t)dn;
             st->freeze_count++;
         }
     }
+    st->next_freeze_id = (uint32_t)st->freeze_count + 1;
+    if (st->next_freeze_id == 0) {
+        st->next_freeze_id = 1;
+    }
+    /* overlay_open is RAM-only; ignore it if a file ever contained it. */
 
     cheats_clear();
     ch = cJSON_GetObjectItemCaseSensitive(root, "cheat");

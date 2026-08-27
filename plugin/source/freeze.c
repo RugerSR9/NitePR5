@@ -7,17 +7,19 @@ void freeze_tick(void)
 {
     nitepr5_state_t *st = nitepr5_state();
     int i;
+    int was;
 
     if (!st->armed) {
         return;
     }
 
-    if (!dbg_connected()) {
-        if (dbg_connect() != 0) {
-            st->dbg = 0;
-            notify_dbg_missing();
-            return;
-        }
+    was = dbg_connected();
+    if (dbg_ensure() != 0) {
+        st->dbg = 0;
+        notify_dbg_missing();
+        return;
+    }
+    if (!was) {
         st->dbg = 1;
         notify_dbg_recovered();
     }

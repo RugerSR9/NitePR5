@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Refuse host toolchains. Compile with Johns SDK (prospero-cmake) on Linux CI —
-# not MSVC on the Windows dev PC. See plugin/build.sh and .github/workflows/plugin.yml.
+# Johns SDK ELF (fps_elf-shaped), not utility_daemon .plugin.
+# Compile with prospero-cmake on Linux CI — not MSVC on the Windows dev PC.
 if(NOT PS5SDK)
   if(DEFINED ENV{PS5SDK} AND NOT "$ENV{PS5SDK}" STREQUAL "")
     set(PS5SDK "$ENV{PS5SDK}")
@@ -14,7 +14,6 @@ if(NOT PS5_PAYLOAD_SDK)
 endif()
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
-  # Johns SDK install: toolchain/prospero.cmake (used by bin/prospero-cmake).
   if(PS5_PAYLOAD_SDK AND EXISTS "${PS5_PAYLOAD_SDK}/toolchain/prospero.cmake")
     set(CMAKE_TOOLCHAIN_FILE "${PS5_PAYLOAD_SDK}/toolchain/prospero.cmake"
         CACHE FILEPATH "PS5 payload SDK toolchain")
@@ -30,73 +29,66 @@ endif()
 if(NOT PS5SDK AND NOT PS5_PAYLOAD_SDK)
   message(FATAL_ERROR
     "PS5SDK or PS5_PAYLOAD_SDK must be set. "
-    "Build with Johns SDK: bash plugin/build.sh (GitHub Actions) — "
+    "Build with Johns SDK: bash overlay/build.sh — "
     "do not configure with a host compiler on Windows.")
 endif()
 
-project(nitepr5 C)
+project(overlay C)
 
 if(NOT CMAKE_C_COMPILER_ID MATCHES "[Cc]lang")
   message(FATAL_ERROR
-    "nitepr5 is meant to be built with clang (got ${CMAKE_C_COMPILER_ID}). "
+    "overlay is meant to be built with clang (got ${CMAKE_C_COMPILER_ID}). "
     "Use ${PS5_PAYLOAD_SDK}/bin/prospero-cmake.")
 endif()
-
-set(PLUGIN_TITLE_ID "NTPR50001")
-set(PLUGIN_VERSION "0.50")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_executable(nitepr5
+add_executable(overlay
   source/main.c
-  source/http.c
-  source/dbg_client.c
-  source/freeze.c
-  source/cheats.c
-  source/notify.c
-  source/fs_state.c
+  source/util.c
+  source/detour.c
+  source/resolve.c
+  source/hooks.c
+  source/draw.c
+  source/font.c
+  source/hud.c
+  source/http_client.c
+  source/worker.c
   third_party/cjson/cJSON.c
 )
 
-target_include_directories(nitepr5 PRIVATE
+target_include_directories(overlay PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson"
 )
 
 if(PS5_PAYLOAD_SDK)
-  target_include_directories(nitepr5 SYSTEM PRIVATE "${PS5_PAYLOAD_SDK}/include")
+  target_include_directories(overlay SYSTEM PRIVATE "${PS5_PAYLOAD_SDK}/include")
 endif()
 
-target_compile_definitions(nitepr5 PRIVATE
-  PLUGIN_TITLE_ID="${PLUGIN_TITLE_ID}"
-  PLUGIN_VERSION="${PLUGIN_VERSION}"
+target_compile_definitions(overlay PRIVATE
   CJSON_HIDE_SYMBOLS
+  NITEPR5_OVERLAY=1
 )
 
-# utility_daemon link set. No hijacker, no ScePad.
-target_link_libraries(nitepr5 PRIVATE
-  SceLibcInternal
-  SceSystemService
+# fps_elf links kernel + SceGnmDriver. Pad + sockets for DualSense and :1745.
+# Hijacker is not a link dependency (no game RAM R/W). kernel_* helpers are
+# only for mprotect / localhost sockets after inject.
+target_link_libraries(overlay PRIVATE
+  kernel
+  SceGnmDriver
+  ScePad
   SceNet
   SceSysmodule
   SceUserService
-  SceNetCtl
+  SceLibcInternal
   kernel_sys
 )
 
-set_target_properties(nitepr5 PROPERTIES
-  OUTPUT_NAME "nitepr5"
+set_target_properties(overlay PROPERTIES
+  OUTPUT_NAME "overlay"
   PREFIX ""
   SUFFIX ".elf"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
-
-# Wrap ELF as etaHEN .plugin: etaHEN_PLUGIN\0TID\0version\0 + ELF bytes.
-add_custom_command(TARGET nitepr5 POST_BUILD
-  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_plugin.py"
-          "$<TARGET_FILE:nitepr5>" "${PLUGIN_TITLE_ID}" "${PLUGIN_VERSION}"
-  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.50)"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-  VERBATIM
 )

@@ -45,6 +45,74 @@ static uint64_t get_u64le(const uint8_t *p)
     return (uint64_t)get_u32le(p) | ((uint64_t)get_u32le(p + 4) << 32);
 }
 
+static uint16_t get_u16le(const uint8_t *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static void cstr_fixed(char *dst, size_t cap, const uint8_t *src, size_t n)
+{
+    size_t i;
+
+    if (dst == NULL || cap == 0) {
+        return;
+    }
+    for (i = 0; i + 1 < cap && i < n && src[i]; i++) {
+        dst[i] = (char)src[i];
+    }
+    dst[i] = 0;
+}
+
+void dbg_decode_map(const uint8_t *row58, char name[33], uint64_t *start, uint64_t *end,
+                    uint64_t *offset, uint16_t *prot)
+{
+    /* char name[32] + u64 start + u64 end + u64 offset + u16 prot (ps5dbg VmMap). */
+    if (row58 == NULL) {
+        return;
+    }
+    cstr_fixed(name, 33, row58, 32);
+    if (start) {
+        *start = get_u64le(row58 + 32);
+    }
+    if (end) {
+        *end = get_u64le(row58 + 40);
+    }
+    if (offset) {
+        *offset = get_u64le(row58 + 48);
+    }
+    if (prot) {
+        *prot = get_u16le(row58 + 56);
+    }
+}
+
+void dbg_decode_proc(const uint8_t *row36, char name[33], int32_t *pid)
+{
+    /* char name[32] + int32 pid (ps5dbg ProcInfo). */
+    if (row36 == NULL) {
+        return;
+    }
+    cstr_fixed(name, 33, row36, 32);
+    if (pid) {
+        *pid = (int32_t)get_u32le(row36 + 32);
+    }
+}
+
+void dbg_decode_foreground(const uint8_t *row140, uint32_t *pid, char titleid[17],
+                           char contentid[65], char name[41], char app_ver[17])
+{
+    /* u32 pid + titleid[16] + contentid[64] + name[40] + app_ver[16]. */
+    if (row140 == NULL) {
+        return;
+    }
+    if (pid) {
+        *pid = get_u32le(row140);
+    }
+    cstr_fixed(titleid, 17, row140 + 4, 16);
+    cstr_fixed(contentid, 65, row140 + 20, 64);
+    cstr_fixed(name, 41, row140 + 84, 40);
+    cstr_fixed(app_ver, 17, row140 + 124, 16);
+}
+
 static int send_all(int fd, const void *buf, size_t n)
 {
     const uint8_t *p = (const uint8_t *)buf;
@@ -102,6 +170,14 @@ void dbg_disconnect(void)
 int dbg_connected(void)
 {
     return g_fd >= 0;
+}
+
+int dbg_ensure(void)
+{
+    if (dbg_connected()) {
+        return 0;
+    }
+    return dbg_connect();
 }
 
 static int send_request(uint32_t cmd, const void *body, uint32_t datalen)
@@ -263,6 +339,33 @@ int dbg_proc_write(uint32_t pid, uint64_t addr, const uint8_t *data, uint32_t le
         }
     }
     return read_status();
+}
+
+int dbg_proc_read(uint32_t pid, uint64_t addr, uint8_t *out, uint32_t length)
+{
+    uint8_t packet[DBG_READ_PACKET_LEN];
+
+    if (out == NULL || length < 1 || length > DBG_READ_MAX) {
+        return -1;
+    }
+
+    /* One-phase: request body is exactly 16 bytes. Reply is SUCCESS then `length` bytes. */
+    memset(packet, 0, sizeof packet);
+    put_u32le(packet + 0, pid);
+    put_u64le(packet + 4, addr);
+    put_u32le(packet + 12, length);
+
+    if (send_request(PROC_READ, packet, DBG_READ_PACKET_LEN) != 0) {
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    if (recv_all(g_fd, out, length) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    return 0;
 }
 
 static int recv_count_then(uint32_t *count, void *entries, uint32_t cap, uint32_t elem)

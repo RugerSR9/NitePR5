@@ -4,16 +4,17 @@ Machine-readable for orchestrators. Update this file at the end of every agent s
 
 ```yaml
 product: NitePR5
-active_phase: 4
-phase_state: done   # not_started | in_progress | code_complete | blocked_on_hardware | done
+active_phase: 5
+phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-26
-# Phase 4 done on hardware: NTPR50001 loads; plugin freeze overwrites web pokes.
+# Phase 5 Wave 2 source complete. B3 overlay/ ELF + plugin 0.50 I/O. CI builds both.
+# Hardware exit not run. Overlay UI is full editor (Live / Watch / Freeze / Cheats).
+# Overlay talks to plugin :1745, not a second :744. B2 is dead (Toolbox fork).
+# Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
 # GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
-# Do not start Phase 5 (overlay/) unless the user asks.
-# Handoff: plugin owns freeze when armed; web stops freeze_tick. Port 1745. Title NTPR50001.
-# PROC_WRITE: do not use ps5dbg 0.1.1 PS5Debug.write() — payload-in-datalen hangs :744.
-# LangSmith: TRACE_TO_LANGSMITH in .env; skills in .agents/skills + .cursor/skills.
-# 64-bit VA jump: JS must not `addr & ~0xf` (ToInt32 → negative /api/read). Align with modulo.
+# PROC_WRITE: two-phase only — ps5dbg 0.1.1 write() hangs :744.
+# LangSmith: TRACE_TO_LANGSMITH in .env.
+# 64-bit VA: JS must not addr & ~0xf (ToInt32). Align with modulo.
 ```
 
 | Phase | State | Notes |
@@ -23,13 +24,14 @@ last_updated: 2026-08-26
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | not_started | Do not create `overlay/` early; pick B2 **or** B3 |
+| 5 Overlay spike | code_complete | **B3**. Plugin 0.50 + `overlay/` ELF. Hardware exit not run. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
+- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (0.50) + `overlay.elf`; inject into CUSA13762 `eboot.bin`; L1+R1+Touchpad; poke one Live value. If the HUD is blank (VideoOut buffers registered before inject), that is a spike kill — not a toast fallback.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
-- After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs :744 the same way.
+- After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
 ## Session log
 
@@ -76,3 +78,11 @@ last_updated: 2026-08-26
 | 2026-08-26 | orchestrator | Title ID locked **NTPR50001** (4 letters + 5 digits). NPR500001 was invalid; etaHEN would not load it. User: plugin loads, startup toast seen. |
 | 2026-08-26 | orchestrator | Phase 4 hardware exit passed: console freeze overwrites a manual web poke. Marked `done`. No Phase 5 unless asked. |
 | 2026-08-26 | orchestrator | After 3–4 scans: Next Scan 200 then peephole `timed out reading 4 bytes`. Dropped `TS_RESCAN_ALIASING`; PROC_NOP after turbo COUNT. Plugin connects :744 only when armed. |
+| 2026-08-26 | orchestrator | Phase 5 started (user). Wave 0: parallel explore B2 / B3 / plugin I/O. Overlay UI = Live+Watch+Freeze+Cheats views. No `overlay/` until backend pick. |
+| 2026-08-26 | orchestrator | Wave 0 plugin I/O: GO — PROC_READ `0xBDAA0002` one-phase + :1745 Live/Watch/Freeze/Cheats. Overlay open/close owns :744 if not armed. No second :744. Wave 1 held until B2/B3. |
+| 2026-08-26 | orchestrator | Wave 0 B2: NO-GO. Overlay Labels + GetData shortcuts are Toolbox-in-ShellUI only; no plugin PUI API. Fork required. Waiting on B3. |
+| 2026-08-26 | orchestrator | Wave 0 B3: GO with caveats. Inject+flip+pad proven; translucent HUD is greenfield (fps_elf is toasts). Recommend B3. User pick before Wave 1. |
+| 2026-08-26 | orchestrator | User picked **B3**. Spawn Wave 1 `plugin/` PROC_READ + :1745 Live/Watch/Freeze/Cheats. No `overlay/` yet. |
+| 2026-08-26 | orchestrator | Wave 1 merged: plugin 0.50 PROC_READ + :1745 editor routes. Spawn Wave 2 `overlay/` ELF + CI. |
+| 2026-08-26 | orchestrator | Wave 2 CI: sibling `overlay` job in `.github/workflows/main.yml` (skip if no CMakeLists). Waiting on overlay ELF source. |
+| 2026-08-26 | orchestrator | Wave 2 overlay ELF merged (`overlay/`). Open uses getpid()+`/overlay/open` (not `/foreground` first). `code_complete`; hardware exit not run. |

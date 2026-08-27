@@ -2,13 +2,13 @@
 
 Homebrew memory editor for a jailbroken PS5 (firmware **9.60**, **etaHEN**, **ps5debug-NG**). Named after PSP **NitePR**: search, hex-edit, freeze, and save cheats while a game runs.
 
-The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. Phase 4 plugin source is in `plugin/`; GitHub Actions builds `nitepr5.plugin`. Overlay is still later.
+The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connect to the console, and edit the foreground title. Phase 4 plugin source is in `plugin/`; Phase 5 B3 overlay source is in `overlay/`. GitHub Actions builds `nitepr5.plugin` and `overlay.elf`.
 
 **Humans:** this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Progress: [docs/STATUS.md](docs/STATUS.md). **Agents:** start at [AGENTS.md](AGENTS.md) and [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
-Phases 0–4 are **done**. The web UI is the shippable PC editor; the etaHEN plugin (**NTPR50001**) owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phases 0–4 are **done**. Phase 5 overlay is **code-complete** (not hardware-verified): plugin **NTPR50001** 0.50 plus `overlay.elf`. The web UI is the shippable PC editor; the plugin owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -136,7 +136,7 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 | 2 Scan loop | done | Turbo scan on-console; CUSA13762 hunt passed |
 | 3 Hex, poke, freeze, JSON | done | First usable product; poke/freeze/cheat passed on hardware |
 | 4 Plugin daemon | done | Freezes on-console (NTPR50001); `.plugin` from GitHub Actions |
-| 5 Overlay spike | not started | See-through TV panel (one backend) |
+| 5 Overlay spike | code_complete | See-through TV panel (B3); hardware poke not run |
 | 6 Backlog | parked | Shared sessions, pointer/AOB, etc. — only if asked |
 
 ## Do not
@@ -147,5 +147,5 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 - Assume an etaHEN plugin can draw the system overlay — it cannot
 - Dump or poll all of game RAM
 - Enable `PT_ATTACH` / pause-the-game from this product
-- Create `overlay/` before Phase 5
+- Send `overlay.elf` to elfldr **9021** (inject via NineS **:9033** into `eboot.bin`)
 - Use this online or on hardware you do not own

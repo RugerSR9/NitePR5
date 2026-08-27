@@ -414,4 +414,6 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-25 | Phase 4: plugin owns freeze when armed (web stops `freeze_tick`). Command port **1745**. Title **NTPR50001**. Source-only `plugin/` — no PS5 ELF cross-compile on the Windows dev PC. Notifications (B1) only. |
 | 2026-08-26 | Plugin ELF is compiled in GitHub Actions only (`workflow_dispatch` artifact or Release asset). No SDK/WSL/Docker on the Windows PC. Install `.plugin` via Toolbox, never elfldr 9021. |
 | 2026-08-26 | Plugin title ID is **NTPR50001** (`^[A-Za-z]{4}\d{5}$`). **NPR500001** (3 letters + 6 digits) is invalid; etaHEN will not load it. User confirmed load + startup toast. |
-| 2026-08-26 | Phase 4 hardware exit passed: plugin freeze overwrites a manual web poke. Phase 4 `done`. Overlay (Phase 5) stays parked until asked. |
+| 2026-08-26 | Phase 4 hardware exit passed: plugin freeze overwrites a manual web poke. Phase 4 `done`. |
+| 2026-08-26 | Phase 5 backend is **B3** (in-game ELF). **B2 is dead** (Toolbox fork). Overlay is a full TV editor (Live/Watch/Freeze/Cheats); scans stay on the PC. Overlay talks to plugin `:1745` only. |
+| 2026-08-26 | Phase 5 Wave 2 source complete: B3 in-game ELF in `overlay/` (VideoOut composite HUD, DualSense, `:1745` client). Hardware exit not run. |

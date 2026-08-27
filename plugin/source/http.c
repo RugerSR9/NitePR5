@@ -18,9 +18,13 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <inttypes.h>
+#include <stdint.h>
 
 #define HTTP_HDR_MAX  8192
 #define HTTP_BODY_MAX (256 * 1024)
+#define HTTP_QUERY_MAX 256
+#define HTTP_LIST_CAP  4096
 
 static int send_all(int fd, const void *buf, size_t n)
 {
@@ -100,6 +104,161 @@ static int path_is(const char *path, const char *want)
     return path[n] == 0 || (path[n] == '/' && path[n + 1] == 0);
 }
 
+static int path_id(const char *path, const char *pfx, uint32_t *id)
+{
+    size_t n;
+    char *end;
+    unsigned long v;
+
+    if (path == NULL || pfx == NULL || id == NULL) {
+        return 0;
+    }
+    n = strlen(pfx);
+    if (strncmp(path, pfx, n) != 0) {
+        return 0;
+    }
+    if (path[n] < '0' || path[n] > '9') {
+        return 0;
+    }
+    errno = 0;
+    v = strtoul(path + n, &end, 10);
+    if (errno == ERANGE || end == path + n || *end != 0 || v > 0xfffffffful) {
+        return 0;
+    }
+    *id = (uint32_t)v;
+    return 1;
+}
+
+static int query_val(const char *query, const char *key, char *out, size_t cap)
+{
+    size_t klen;
+    const char *p;
+
+    if (query == NULL || key == NULL || out == NULL || cap == 0) {
+        return -1;
+    }
+    out[0] = 0;
+    klen = strlen(key);
+    p = query;
+    while (*p) {
+        const char *amp;
+        if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
+            size_t n;
+            p += klen + 1;
+            amp = strchr(p, '&');
+            n = amp ? (size_t)(amp - p) : strlen(p);
+            if (n >= cap) {
+                n = cap - 1;
+            }
+            memcpy(out, p, n);
+            out[n] = 0;
+            return 0;
+        }
+        amp = strchr(p, '&');
+        if (amp == NULL) {
+            break;
+        }
+        p = amp + 1;
+    }
+    return -1;
+}
+
+static void json_add_u64(cJSON *obj, const char *key, uint64_t v)
+{
+    char num[32];
+
+    snprintf(num, sizeof num, "%" PRIu64, v);
+    cJSON_AddRawToObject(obj, key, num);
+}
+
+static int json_u64(cJSON *item, uint64_t *out)
+{
+    char *printed;
+    char *end;
+    unsigned long long v;
+
+    if (item == NULL || out == NULL) {
+        return -1;
+    }
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        return nitepr5_parse_u64(item->valuestring, out);
+    }
+    if (!cJSON_IsNumber(item) || item->valuedouble < 0) {
+        return -1;
+    }
+    printed = cJSON_PrintUnformatted(item);
+    if (printed != NULL) {
+        errno = 0;
+        end = NULL;
+        v = strtoull(printed, &end, 10);
+        if (errno != ERANGE && end != printed && *end == 0) {
+            cJSON_free(printed);
+            *out = (uint64_t)v;
+            return 0;
+        }
+        cJSON_free(printed);
+    }
+    *out = (uint64_t)item->valuedouble;
+    return 0;
+}
+
+static int query_pid(const char *query, uint32_t fallback, uint32_t *out)
+{
+    char buf[32];
+    uint64_t v;
+
+    if (out == NULL) {
+        return -1;
+    }
+    if (query_val(query, "pid", buf, sizeof buf) != 0) {
+        *out = fallback;
+        return 0;
+    }
+    if (nitepr5_parse_u64(buf, &v) != 0 || v > 0xffffffffull) {
+        return -1;
+    }
+    *out = (uint32_t)v;
+    return 0;
+}
+
+static int require_dbg(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+
+    if (!st->armed && !st->overlay_open) {
+        http_err(fd, "NotConnected");
+        return -1;
+    }
+    if (dbg_ensure() != 0) {
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return -1;
+    }
+    st->dbg = 1;
+    return 0;
+}
+
+static void http_send_obj(int fd, int code, cJSON *o)
+{
+    char *js;
+
+    if (o == NULL) {
+        http_err(fd, "BadRequest");
+        return;
+    }
+    js = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    http_send(fd, code, js ? js : "{\"ok\":false,\"error\":\"BadRequest\"}");
+    if (js) {
+        cJSON_free(js);
+    }
+}
+
+static int watch_n_ok(uint32_t n)
+{
+    return n == 1 || n == 2 || n == 4 || n == 8;
+}
+
 static int starts_ci(const char *s, const char *pfx)
 {
     while (*pfx) {
@@ -142,7 +301,7 @@ static int parse_content_length(const char *hdrs, size_t n, size_t *out)
 }
 
 static int recv_request(int fd, char *method, size_t method_cap, char *path, size_t path_cap,
-                        char **body, size_t *body_n)
+                        char *query, size_t query_cap, char **body, size_t *body_n)
 {
     char hdr[HTTP_HDR_MAX];
     size_t n = 0;
@@ -159,6 +318,9 @@ static int recv_request(int fd, char *method, size_t method_cap, char *path, siz
     *body_n = 0;
     method[0] = 0;
     path[0] = 0;
+    if (query != NULL && query_cap > 0) {
+        query[0] = 0;
+    }
 
     while (n < sizeof hdr - 1) {
         ssize_t r = recv(fd, hdr + n, sizeof hdr - 1 - n, 0);
@@ -215,6 +377,10 @@ static int recv_request(int fd, char *method, size_t method_cap, char *path, siz
         char *q = strchr(sp1 + 1, '?');
         if (q != NULL) {
             *q = 0;
+            if (query != NULL && query_cap > 0) {
+                strncpy(query, q + 1, query_cap - 1);
+                query[query_cap - 1] = 0;
+            }
         }
     }
     strncpy(path, sp1 + 1, path_cap - 1);
@@ -279,6 +445,8 @@ static void handle_status(int fd)
         cJSON_AddItemToArray(en, cJSON_CreateString(st->enabled[i]));
     }
     cJSON_AddBoolToObject(o, "dbg", st->dbg ? 1 : 0);
+    cJSON_AddBoolToObject(o, "overlay_open", st->overlay_open ? 1 : 0);
+    cJSON_AddNumberToObject(o, "watch_count", st->watch_count);
     js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     http_send(fd, 200, js ? js : "{\"ok\":false,\"error\":\"BadRequest\"}");
@@ -292,23 +460,25 @@ static int parse_freeze_row(cJSON *row, freeze_entry_t *out)
     cJSON *addr;
     cJSON *data;
     size_t n = 0;
+    uint64_t va = 0;
 
     if (!cJSON_IsObject(row)) {
         return -1;
     }
     addr = cJSON_GetObjectItemCaseSensitive(row, "addr");
     data = cJSON_GetObjectItemCaseSensitive(row, "data");
-    if (!cJSON_IsNumber(addr) || addr->valuedouble < 0) {
+    if (addr == NULL || !cJSON_IsString(data) || data->valuestring == NULL) {
         return -1;
     }
-    if (!cJSON_IsString(data) || data->valuestring == NULL) {
+    if (json_u64(addr, &va) != 0) {
         return -1;
     }
     if (nitepr5_parse_hex(data->valuestring, out->data, FREEZE_DATA_MAX, &n) != 0 ||
         n < 1 || n > FREEZE_DATA_MAX) {
         return -1;
     }
-    out->addr = (uint64_t)addr->valuedouble;
+    out->id = 0;
+    out->addr = va;
     out->n = (uint8_t)n;
     return 0;
 }
@@ -408,6 +578,13 @@ static void handle_arm(int fd, const char *body, size_t body_n)
     st->pid = pid;
     st->freeze_count = freeze_n;
     memcpy(st->freezes, local, sizeof(freeze_entry_t) * (size_t)freeze_n);
+    for (i = 0; i < freeze_n; i++) {
+        st->freezes[i].id = (uint32_t)(i + 1);
+    }
+    st->next_freeze_id = (uint32_t)freeze_n + 1;
+    if (st->next_freeze_id == 0) {
+        st->next_freeze_id = 1;
+    }
     st->armed = 1;
 
     (void)fs_state_save();
@@ -443,8 +620,12 @@ static void handle_disarm(int fd)
     nitepr5_state_t *st = nitepr5_state();
 
     st->armed = 0;
-    dbg_disconnect();
-    st->dbg = 0;
+    if (!st->overlay_open) {
+        dbg_disconnect();
+        st->dbg = 0;
+    } else {
+        st->dbg = dbg_connected() ? 1 : 0;
+    }
     (void)fs_state_save();
     http_send(fd, 200, "{\"ok\":true,\"armed\":false}");
 }
@@ -553,15 +734,630 @@ static void handle_cheat_load(int fd, const char *body, size_t body_n)
     }
 }
 
+static void handle_overlay_open(int fd, const char *body)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *root;
+    cJSON *pid_j;
+    uint32_t pid;
+    cJSON *o;
+
+    root = cJSON_Parse((body && body[0]) ? body : "{}");
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    pid_j = cJSON_GetObjectItemCaseSensitive(root, "pid");
+    if (pid_j != NULL && !cJSON_IsNull(pid_j)) {
+        uint64_t v;
+        if (json_u64(pid_j, &v) != 0 || v > 0xffffffffull) {
+            cJSON_Delete(root);
+            http_err(fd, "BadRequest");
+            return;
+        }
+        pid = (uint32_t)v;
+        st->pid = pid;
+        (void)fs_state_save();
+    } else {
+        pid = st->pid;
+    }
+    cJSON_Delete(root);
+    if (pid == 0) {
+        http_err(fd, "NoTarget");
+        return;
+    }
+    st->overlay_open = 1;
+    if (dbg_ensure() == 0) {
+        st->dbg = 1;
+        notify_dbg_recovered();
+    } else {
+        st->dbg = 0;
+        notify_dbg_missing();
+    }
+    o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "ok", 1);
+    cJSON_AddBoolToObject(o, "overlay_open", 1);
+    cJSON_AddNumberToObject(o, "pid", (double)st->pid);
+    cJSON_AddBoolToObject(o, "dbg", st->dbg ? 1 : 0);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_overlay_close(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+
+    st->overlay_open = 0;
+    st->watch_count = 0;
+    st->next_watch_id = 1;
+    memset(st->watches, 0, sizeof st->watches);
+    if (!st->armed) {
+        dbg_disconnect();
+        st->dbg = 0;
+    } else {
+        st->dbg = dbg_connected() ? 1 : 0;
+    }
+    http_send(fd, 200, "{\"ok\":true,\"overlay_open\":false}");
+}
+
+static void handle_read(int fd, const char *query)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    char abuf[32];
+    char nbuf[32];
+    uint64_t addr = 0;
+    uint64_t n64 = 0;
+    uint32_t n;
+    uint32_t pid = 0;
+    uint8_t data[READ_MAX];
+    char hex[READ_MAX * 2 + 1];
+    cJSON *o;
+
+    if (query_val(query, "addr", abuf, sizeof abuf) != 0 || nitepr5_parse_u64(abuf, &addr) != 0) {
+        http_err(fd, "BadRequest");
+        return;
+    }
+    if (query_val(query, "n", nbuf, sizeof nbuf) == 0) {
+        if (nitepr5_parse_u64(nbuf, &n64) != 0 || n64 == 0) {
+            http_err(fd, "InvalidReadSize");
+            return;
+        }
+        if (n64 > READ_MAX) {
+            http_err(fd, "ReadTooLarge");
+            return;
+        }
+        n = (uint32_t)n64;
+    } else {
+        n = HEX_PEEPHOLE_DEFAULT;
+    }
+    if (query_pid(query, st->pid, &pid) != 0) {
+        http_err(fd, "BadRequest");
+        return;
+    }
+    if (pid == 0) {
+        http_err(fd, "NoTarget");
+        return;
+    }
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    if (dbg_proc_read(pid, addr, data, n) != 0) {
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return;
+    }
+    nitepr5_hex_encode(data, n, hex, sizeof hex);
+    o = cJSON_CreateObject();
+    json_add_u64(o, "addr", addr);
+    cJSON_AddNumberToObject(o, "n", (double)n);
+    cJSON_AddStringToObject(o, "data", hex);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_write(int fd, const char *body)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *root;
+    cJSON *addr_j;
+    cJSON *data_j;
+    cJSON *pid_j;
+    uint64_t addr = 0;
+    uint32_t pid;
+    uint8_t data[WRITE_MAX];
+    size_t n = 0;
+    cJSON *o;
+
+    root = cJSON_Parse(body ? body : "");
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    addr_j = cJSON_GetObjectItemCaseSensitive(root, "addr");
+    data_j = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (json_u64(addr_j, &addr) != 0) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    if (!cJSON_IsString(data_j) || data_j->valuestring == NULL ||
+        nitepr5_parse_hex(data_j->valuestring, data, WRITE_MAX, &n) != 0 || n < 1) {
+        cJSON_Delete(root);
+        http_err(fd, "InvalidWriteSize");
+        return;
+    }
+    pid_j = cJSON_GetObjectItemCaseSensitive(root, "pid");
+    if (pid_j != NULL && !cJSON_IsNull(pid_j)) {
+        uint64_t v;
+        if (json_u64(pid_j, &v) != 0 || v > 0xffffffffull) {
+            cJSON_Delete(root);
+            http_err(fd, "BadRequest");
+            return;
+        }
+        pid = (uint32_t)v;
+    } else {
+        pid = st->pid;
+    }
+    cJSON_Delete(root);
+    if (pid == 0) {
+        http_err(fd, "NoTarget");
+        return;
+    }
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    if (dbg_proc_write(pid, addr, data, (uint32_t)n) != 0) {
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return;
+    }
+    o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "ok", 1);
+    json_add_u64(o, "addr", addr);
+    cJSON_AddNumberToObject(o, "n", (double)n);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_maps(int fd, const char *query)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    uint32_t pid = 0;
+    uint8_t *buf;
+    uint32_t count = 0;
+    uint32_t i;
+    cJSON *o;
+    cJSON *arr;
+
+    if (query_pid(query, st->pid, &pid) != 0) {
+        http_err(fd, "BadRequest");
+        return;
+    }
+    if (pid == 0) {
+        http_err(fd, "NoTarget");
+        return;
+    }
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    buf = (uint8_t *)malloc((size_t)HTTP_LIST_CAP * DBG_MAP_ENTRY_SIZE);
+    if (buf == NULL) {
+        http_send(fd, 500, "{\"ok\":false,\"error\":\"BadRequest\"}");
+        return;
+    }
+    if (dbg_proc_maps(pid, buf, HTTP_LIST_CAP, &count) != 0) {
+        free(buf);
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return;
+    }
+    o = cJSON_CreateObject();
+    arr = cJSON_AddArrayToObject(o, "maps");
+    for (i = 0; i < count; i++) {
+        cJSON *row = cJSON_CreateObject();
+        char name[33];
+        uint64_t start = 0;
+        uint64_t end = 0;
+        uint64_t offset = 0;
+        uint16_t prot = 0;
+
+        dbg_decode_map(buf + (size_t)i * DBG_MAP_ENTRY_SIZE, name, &start, &end, &offset, &prot);
+        cJSON_AddStringToObject(row, "name", name);
+        json_add_u64(row, "start", start);
+        json_add_u64(row, "end", end);
+        json_add_u64(row, "offset", offset);
+        cJSON_AddNumberToObject(row, "prot", (double)prot);
+        cJSON_AddItemToArray(arr, row);
+    }
+    free(buf);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_processes(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    uint8_t *buf;
+    uint32_t count = 0;
+    uint32_t i;
+    cJSON *o;
+    cJSON *arr;
+
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    buf = (uint8_t *)malloc((size_t)HTTP_LIST_CAP * DBG_PROC_ENTRY_SIZE);
+    if (buf == NULL) {
+        http_send(fd, 500, "{\"ok\":false,\"error\":\"BadRequest\"}");
+        return;
+    }
+    if (dbg_proc_list(buf, HTTP_LIST_CAP, &count) != 0) {
+        free(buf);
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return;
+    }
+    o = cJSON_CreateObject();
+    arr = cJSON_AddArrayToObject(o, "processes");
+    for (i = 0; i < count; i++) {
+        cJSON *row = cJSON_CreateObject();
+        char name[33];
+        int32_t pid = 0;
+
+        dbg_decode_proc(buf + (size_t)i * DBG_PROC_ENTRY_SIZE, name, &pid);
+        cJSON_AddNumberToObject(row, "pid", (double)pid);
+        cJSON_AddStringToObject(row, "name", name);
+        cJSON_AddItemToArray(arr, row);
+    }
+    free(buf);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_foreground(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    uint8_t row[DBG_FOREGROUND_SIZE];
+    uint32_t pid = 0;
+    char titleid[17];
+    char contentid[65];
+    char name[41];
+    char app_ver[17];
+    cJSON *o;
+
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    if (dbg_foreground(row) != 0) {
+        st->dbg = 0;
+        http_err(fd, "NotConnected");
+        return;
+    }
+    dbg_decode_foreground(row, &pid, titleid, contentid, name, app_ver);
+    o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "pid", (double)pid);
+    cJSON_AddStringToObject(o, "name", name);
+    cJSON_AddStringToObject(o, "titleid", titleid);
+    cJSON_AddStringToObject(o, "contentid", contentid);
+    cJSON_AddStringToObject(o, "app_ver", app_ver);
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_attach(int fd, const char *body)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *root;
+    cJSON *pid_j;
+    uint64_t v;
+    uint32_t pid;
+    cJSON *o;
+
+    root = cJSON_Parse(body ? body : "");
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    pid_j = cJSON_GetObjectItemCaseSensitive(root, "pid");
+    if (json_u64(pid_j, &v) != 0 || v > 0xffffffffull) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    pid = (uint32_t)v;
+    cJSON_Delete(root);
+    st->pid = pid;
+    (void)fs_state_save();
+    o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "ok", 1);
+    cJSON_AddNumberToObject(o, "pid", (double)pid);
+    http_send_obj(fd, 200, o);
+}
+
+static cJSON *watch_to_json(const watch_entry_t *w)
+{
+    cJSON *row = cJSON_CreateObject();
+
+    cJSON_AddNumberToObject(row, "id", (double)w->id);
+    json_add_u64(row, "addr", w->addr);
+    cJSON_AddNumberToObject(row, "n", (double)w->n);
+    cJSON_AddStringToObject(row, "label", w->label);
+    return row;
+}
+
+static void handle_watch_list(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *o = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(o, "watches");
+    int i;
+
+    for (i = 0; i < st->watch_count; i++) {
+        cJSON_AddItemToArray(arr, watch_to_json(&st->watches[i]));
+    }
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_watch_add(int fd, const char *body)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *root;
+    cJSON *addr_j;
+    cJSON *n_j;
+    cJSON *lab;
+    uint64_t addr = 0;
+    uint32_t n = 4;
+    watch_entry_t *w;
+
+    root = cJSON_Parse(body ? body : "");
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    addr_j = cJSON_GetObjectItemCaseSensitive(root, "addr");
+    if (json_u64(addr_j, &addr) != 0) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    n_j = cJSON_GetObjectItemCaseSensitive(root, "n");
+    if (n_j != NULL && !cJSON_IsNull(n_j)) {
+        uint64_t vn;
+        if (json_u64(n_j, &vn) != 0) {
+            cJSON_Delete(root);
+            http_err(fd, "InvalidWatchSize");
+            return;
+        }
+        n = (uint32_t)vn;
+    }
+    if (!watch_n_ok(n)) {
+        cJSON_Delete(root);
+        http_err(fd, "InvalidWatchSize");
+        return;
+    }
+    if (st->watch_count >= WATCH_MAX) {
+        cJSON_Delete(root);
+        http_err(fd, "WatchLimit");
+        return;
+    }
+    w = &st->watches[st->watch_count];
+    memset(w, 0, sizeof *w);
+    w->id = st->next_watch_id++;
+    if (st->next_watch_id == 0) {
+        st->next_watch_id = 1;
+    }
+    w->addr = addr;
+    w->n = (uint8_t)n;
+    lab = cJSON_GetObjectItemCaseSensitive(root, "label");
+    if (cJSON_IsString(lab) && lab->valuestring) {
+        nitepr5_copy_str(w->label, WATCH_LABEL_LEN, lab->valuestring);
+    }
+    st->watch_count++;
+    cJSON_Delete(root);
+    http_send_obj(fd, 200, watch_to_json(w));
+}
+
+static int find_watch(uint32_t id)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    int i;
+
+    for (i = 0; i < st->watch_count; i++) {
+        if (st->watches[i].id == id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void handle_watch_del(int fd, uint32_t id)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    int i = find_watch(id);
+
+    if (i < 0) {
+        http_err(fd, "NoWatch");
+        return;
+    }
+    if (i + 1 < st->watch_count) {
+        memmove(&st->watches[i], &st->watches[i + 1],
+                sizeof(watch_entry_t) * (size_t)(st->watch_count - i - 1));
+    }
+    st->watch_count--;
+    memset(&st->watches[st->watch_count], 0, sizeof(watch_entry_t));
+    http_send(fd, 200, "{\"ok\":true}");
+}
+
+static void handle_watch_poll(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *o;
+    cJSON *arr;
+    int i;
+
+    if (st->pid == 0) {
+        http_err(fd, "NoTarget");
+        return;
+    }
+    if (require_dbg(fd) != 0) {
+        return;
+    }
+    o = cJSON_CreateObject();
+    arr = cJSON_AddArrayToObject(o, "values");
+    for (i = 0; i < st->watch_count; i++) {
+        watch_entry_t *w = &st->watches[i];
+        uint8_t data[8];
+        char hex[17];
+        cJSON *row;
+
+        if (dbg_proc_read(st->pid, w->addr, data, w->n) != 0) {
+            cJSON_Delete(o);
+            st->dbg = 0;
+            http_err(fd, "NotConnected");
+            return;
+        }
+        nitepr5_hex_encode(data, w->n, hex, sizeof hex);
+        row = cJSON_CreateObject();
+        cJSON_AddNumberToObject(row, "id", (double)w->id);
+        json_add_u64(row, "addr", w->addr);
+        cJSON_AddStringToObject(row, "data", hex);
+        cJSON_AddItemToArray(arr, row);
+    }
+    http_send_obj(fd, 200, o);
+}
+
+static cJSON *freeze_to_json(const freeze_entry_t *fr)
+{
+    cJSON *row = cJSON_CreateObject();
+    char hex[FREEZE_DATA_MAX * 2 + 1];
+
+    nitepr5_hex_encode(fr->data, fr->n, hex, sizeof hex);
+    cJSON_AddNumberToObject(row, "id", (double)fr->id);
+    json_add_u64(row, "addr", fr->addr);
+    cJSON_AddStringToObject(row, "data", hex);
+    return row;
+}
+
+static void handle_freeze_list(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *o = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(o, "freezes");
+    int i;
+
+    for (i = 0; i < st->freeze_count; i++) {
+        cJSON_AddItemToArray(arr, freeze_to_json(&st->freezes[i]));
+    }
+    http_send_obj(fd, 200, o);
+}
+
+static void handle_freeze_add(int fd, const char *body)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *root;
+    freeze_entry_t row;
+    freeze_entry_t *fr;
+
+    root = cJSON_Parse(body ? body : "");
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        http_err(fd, "BadRequest");
+        return;
+    }
+    if (parse_freeze_row(root, &row) != 0) {
+        cJSON_Delete(root);
+        http_err(fd, "InvalidFreezeSize");
+        return;
+    }
+    cJSON_Delete(root);
+    if (st->freeze_count >= FREEZE_MAX) {
+        http_err(fd, "FreezeLimit");
+        return;
+    }
+    fr = &st->freezes[st->freeze_count];
+    *fr = row;
+    fr->id = st->next_freeze_id++;
+    if (st->next_freeze_id == 0) {
+        st->next_freeze_id = 1;
+    }
+    st->freeze_count++;
+    (void)fs_state_save();
+    http_send_obj(fd, 200, freeze_to_json(fr));
+}
+
+static int find_freeze(uint32_t id)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    int i;
+
+    for (i = 0; i < st->freeze_count; i++) {
+        if (st->freezes[i].id == id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void handle_freeze_del(int fd, uint32_t id)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    int i = find_freeze(id);
+
+    if (i < 0) {
+        http_err(fd, "NoFreeze");
+        return;
+    }
+    if (i + 1 < st->freeze_count) {
+        memmove(&st->freezes[i], &st->freezes[i + 1],
+                sizeof(freeze_entry_t) * (size_t)(st->freeze_count - i - 1));
+    }
+    st->freeze_count--;
+    memset(&st->freezes[st->freeze_count], 0, sizeof(freeze_entry_t));
+    (void)fs_state_save();
+    http_send(fd, 200, "{\"ok\":true}");
+}
+
+static void handle_cheat_get(int fd)
+{
+    nitepr5_state_t *st = nitepr5_state();
+    cJSON *o = cJSON_CreateObject();
+    cJSON *en;
+    int i;
+
+    if (!st->cheat.loaded) {
+        cJSON_AddNullToObject(o, "cheat");
+    } else {
+        cJSON *ch = cJSON_CreateObject();
+        cJSON *mods;
+        cJSON_AddStringToObject(ch, "name", st->cheat.name);
+        cJSON_AddStringToObject(ch, "id", st->cheat.id);
+        cJSON_AddStringToObject(ch, "version", st->cheat.version);
+        cJSON_AddStringToObject(ch, "process", st->cheat.process);
+        mods = cJSON_AddArrayToObject(ch, "mods");
+        for (i = 0; i < st->cheat.mod_count; i++) {
+            cJSON *m = cJSON_CreateObject();
+            cJSON_AddStringToObject(m, "name", st->cheat.mods[i].name);
+            cJSON_AddItemToArray(mods, m);
+        }
+        cJSON_AddItemToObject(o, "cheat", ch);
+    }
+    en = cJSON_AddArrayToObject(o, "enabled");
+    for (i = 0; i < st->enabled_count; i++) {
+        cJSON_AddItemToArray(en, cJSON_CreateString(st->enabled[i]));
+    }
+    http_send_obj(fd, 200, o);
+}
+
 static void http_handle_client(int fd)
 {
     char method[16];
     char path[128];
+    char query[HTTP_QUERY_MAX];
     char *body = NULL;
     size_t body_n = 0;
+    uint32_t id = 0;
     int rc;
 
-    rc = recv_request(fd, method, sizeof method, path, sizeof path, &body, &body_n);
+    rc = recv_request(fd, method, sizeof method, path, sizeof path, query, sizeof query, &body,
+                      &body_n);
     if (rc == -2) {
         http_err(fd, "BadRequest");
         return;
@@ -573,6 +1369,38 @@ static void http_handle_client(int fd)
 
     if (strcmp(method, "GET") == 0 && path_is(path, "/status")) {
         handle_status(fd);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/overlay/open")) {
+        handle_overlay_open(fd, body);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/overlay/close")) {
+        handle_overlay_close(fd);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/read")) {
+        handle_read(fd, query);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/write")) {
+        handle_write(fd, body);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/maps")) {
+        handle_maps(fd, query);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/processes")) {
+        handle_processes(fd);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/foreground")) {
+        handle_foreground(fd);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/attach")) {
+        handle_attach(fd, body);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/watch/poll")) {
+        handle_watch_poll(fd);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/watch")) {
+        handle_watch_list(fd);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/watch")) {
+        handle_watch_add(fd, body);
+    } else if (strcmp(method, "DELETE") == 0 && path_id(path, "/watch/", &id)) {
+        handle_watch_del(fd, id);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/freeze")) {
+        handle_freeze_list(fd);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/freeze")) {
+        handle_freeze_add(fd, body);
+    } else if (strcmp(method, "DELETE") == 0 && path_id(path, "/freeze/", &id)) {
+        handle_freeze_del(fd, id);
+    } else if (strcmp(method, "GET") == 0 && path_is(path, "/cheat")) {
+        handle_cheat_get(fd);
     } else if (strcmp(method, "POST") == 0 && path_is(path, "/arm")) {
         handle_arm(fd, body, body_n);
     } else if (strcmp(method, "POST") == 0 && path_is(path, "/disarm")) {
