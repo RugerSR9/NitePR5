@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 #define NITEPR5_TITLE_ID "NTPR50001"
-#define NITEPR5_VERSION  "0.57"
+#define NITEPR5_VERSION  "0.571"
 #define NITEPR5_BASENAME "nitepr5"
 
 #define NITEPR5_HTTP_PORT 1745

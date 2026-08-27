@@ -9,7 +9,8 @@ import sys
 
 
 def is_valid_version(version):
-    return re.match(r"^\d\.\d{2}$", version) is not None
+    # etaHEN samples use x.xx (1.00). NitePR5 overlay drops also use x.xxx (0.571).
+    return re.match(r"^\d\.\d{2,3}$", version) is not None
 
 
 def is_valid_tid(tid):
@@ -19,7 +20,7 @@ def is_valid_tid(tid):
 
 def add_header_to_elf(elf_filename, tid, version):
     if not is_valid_version(version):
-        print("Error: Version must be in the format x.xx (e.g., 1.00)")
+        print("Error: Version must be x.xx or x.xxx (e.g., 1.00 or 0.571)")
         sys.exit(1)
     if not is_valid_tid(tid):
         print("Error: TID must be the first 4 letters followed by 5 numbers (e.g., ABCD12345)")

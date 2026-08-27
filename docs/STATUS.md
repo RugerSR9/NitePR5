@@ -7,9 +7,8 @@ product: NitePR5
 active_phase: 5
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-27
-# Phase 5 B3 overlay 0.57: elfldr_inject (map + remote scePthreadCreate).
-# Overlay main() never returns; no game ucred widen (0.56 XMB / CE-108255-1).
-# Heartbeat from main. :1745. Not PROC_ELF, not RIP hijack.
+# Phase 5 B3 overlay 0.571: int3 stager (not pt_call pthread). overlay_gate
+# waits ~2s then CRT. GNM hooks off. Pad poll only. :1745.
 # Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
 # GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
 # PROC_WRITE: two-phase only — ps5dbg 0.1.1 write() hangs :744.
@@ -24,12 +23,12 @@ last_updated: 2026-08-27
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | code_complete | **B3**. Overlay+plugin **0.57** elfldr_inject (pthread, not RIP hijack). |
+| 5 Overlay spike | code_complete | **B3**. Overlay+plugin **0.571** int3 stager; hooks off. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (**0.57**) + `overlay.elf` to `/data/nitepr5/overlay.elf`; Toolbox NTPR50001; ps5debug-NG on 9021; launch CUSA13762; wait ~12 s; toast **overlay injected**; game must **keep running** (no XMB dump, no CE-108255-1); then **overlay running** + **overlay entry is up**; ~5 s later **hooks pad=? flip=? vo=?**; L1+R1+Touchpad. Overlay spike is not optional.
+- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (**0.571**) + `overlay.elf`; expected toast order **overlay injected**, then ~2 s **overlay running**, **pad poll ok**, **pad poll only (hooks off)**, **overlay entry is up**. Game must stay up. No GNM hooks this build. Overlay spike is not optional.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
@@ -93,3 +92,4 @@ last_updated: 2026-08-27
 | 2026-08-27 | orchestrator | User: 0.54 CE-108255-1 during inject. Removed `__crt_syscall`/`thr_new`/handle-sweep/`scePthreadCreate` from the hijacked thread. Overlay 0.55: checked dlsym `sceKernelOpen` heartbeat then RET. |
 | 2026-08-27 | orchestrator | User: overlay spike is not optional. 0.56: replace PROC_ELF with Johns `pt_attach` + `elfldr_exec` (push original RIP). Overlay stock CRT; `main()` pthread_creates `overlay_boot` then returns. Vendored websrv elfldr/pt (GPL-3). |
 | 2026-08-27 | orchestrator | User: 0.56 first boot overlay running then XMB (no CE); later boots running then silent + CE-108255-1. Cause: game ucred widen + CRT `.fini` after `main()` returned. **0.57**: `elfldr_inject` remote `scePthreadCreate`; `main()` never returns; no authid raise. |
+| 2026-08-27 | orchestrator | User: 0.571 toast order running → pad poll ok → injected → CE-108255-1 → silent. `pt_call(scePthreadCreate)` followed the new thread and restored game regs onto it. Same version **0.571** now: int3 stager; overlay_gate ~2s then CRT; GNM hooks off. Do not call it 0.62. |

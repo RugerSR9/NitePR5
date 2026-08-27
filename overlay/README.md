@@ -29,7 +29,7 @@ Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If y
 
 ### One-time setup
 
-1. CI: download `nitepr5.plugin` (**0.57**) and `overlay.elf`.
+1. CI: download `nitepr5.plugin` (**0.571**) and `overlay.elf`.
 2. Copy the plugin to USB `<usb>/etaHEN/plugins/` or `/data/etaHEN/plugins/`.
 3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback path: `/data/etaHEN/plugins/overlay.elf`.
 4. Toolbox: kill/run **NTPR50001**.
@@ -39,7 +39,7 @@ Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If y
 
 After inject you should see extra toasts from the overlay itself: **overlay running**, then **hooks pad=? flip=? vo=?**, then **pad poll ok**. L1+R1+Touchpad click toasts **combo (open)** / **combo (close)**. If you get combo toasts but no panel, the pad path works and VideoOut/flip is the remaining kill. If you only see the plugin **overlay injected** toast, an old PROC_ELF ELF is still on the console (it never reached `main()`).
 
-The plugin waits ~12 s after a game title appears (8 s if a game is already running when NTPR50001 starts), finds `eboot.bin` via `:744`, disconnects that socket, then Johns `elfldr_inject` (attach, map, remote `scePthreadCreate`, detach). Retry up to 5 times if the eboot is not up yet.
+The plugin waits ~12 s after a game title appears, then Johns `elfldr_inject` (int3 stager, not `pt_call`). Overlay CRT starts ~2 s later (`overlay_gate`). **0.571 has GNM/pad hooks off** — combo uses pad poll; no HUD panel yet.
 
 If the ELF file is missing, the toast is **copy overlay.elf to /data/nitepr5**. If ps5debug-NG is not loaded, **load ps5debug-NG to inject HUD**.
 

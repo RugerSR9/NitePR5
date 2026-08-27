@@ -2,9 +2,9 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.57**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Title ID **NTPR50001**, version **0.571**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
-- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_inject** (`pt_attach`, map ELF, remote `scePthreadCreate`, `pt_detach`). `:744` is dropped for that window so ps5debug is not tracing. Idle (not armed, overlay closed) does **not** hold `:744`.
+- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_inject** (map ELF, int3 stager `scePthreadCreate`, `pt_detach`). Do not `pt_call` pthread_create.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.
 - Classic TV toast on start, armed, `:744` missing, overlay injected / missing ELF / inject fail / overlay entry-up vs silent
 - Auto-inject via Johns elfldr (etaHEN FPS path). Attach/detach is **only** the inject window. Game R/W is still `:744`. Not NineS, not PROC_ELF, not elfldr **9021**.

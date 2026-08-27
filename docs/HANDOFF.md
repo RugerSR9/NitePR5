@@ -15,7 +15,7 @@ Phases **0–4 are `done`** on hardware. **Phase 5 is `code_complete` (B3)** —
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
 | Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
-| Phase 5 | **B3** `code_complete`. Overlay+plugin **0.57** elfldr_inject (remote pthread). |
+| Phase 5 | **B3** `code_complete`. Overlay+plugin **0.571** int3 stager; hooks off. |
 
 ### Phase 4 locked contract (user 2026-08-25)
 
@@ -53,11 +53,11 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.57** auto-injects `/data/nitepr5/overlay.elf` via Johns **elfldr_inject** (~12 s): list eboot on `:744`, drop that socket, `pt_attach`, map ELF, remote **`scePthreadCreate`**, `pt_detach`. Overlay **0.57** stock Johns CRT on that pthread; `main()` **never returns** (0.56 CRT `.fini` → CE-108255-1) and **does not raise game authid** (0.56 → XMB). User 2026-08-27: **do not kill the overlay spike**. CI: `nitepr5.plugin` and `overlay.elf`. Do not send either to elfldr **9021**. Do not NineS `:9033`. Game R/W still `:744` after inject.
+Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.571** auto-injects via **int3 stager** (not `pt_call(scePthreadCreate)` — that followed the overlay thread and smashed regs, CE-108255-1 after "injected"). Overlay **0.571** `overlay_gate` waits ~2 s then CRT; `main()` never returns; no game ucred widen; **GNM/pad hooks off** (pad poll only). Do not kill the overlay spike. Do not send overlay to elfldr **9021**. Do not NineS `:9033`.
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NTPR50001 / **0.57**. HTTP :1745. Two-phase PROC_WRITE + one-phase PROC_READ to 127.0.0.1:744. Inject uses vendored websrv `pt.c`/`elfldr.c` (GPL-3) **`elfldr_inject`**, not `PROC_ELF`, not RIP hijack. After inject, plugin stats `/data/nitepr5/overlay.alive` or `/tmp/nitepr5.overlay.alive` (~5 s) and toasts entry-up vs silent. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
+`plugin/` exists. Title NTPR50001 / **0.571**. HTTP :1745. Inject: int3 stager after elfldr_load. Heartbeat `/data/nitepr5/overlay.alive`. ELF is built in GitHub Actions, not on this Windows PC.
 
 `make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
 
@@ -77,7 +77,7 @@ User: full on-TV editor (Live / Watch / Freeze / Cheats / related views). No tur
 
 **Do not kill B3.** User 2026-08-27: overlay spike is not optional.
 
-**Wave 2 overlay (source 2026-08-27):** `overlay/` fps_elf-shaped ELF (not `.plugin`). HTTP client **127.0.0.1:1745** only. Inject: plugin **0.57** Johns `elfldr_inject` ~12 s after launch. Overlay **0.57** stock CRT on the new pthread; `main()` never returns; no game ucred widen.
+**Wave 2 overlay (source 2026-08-27):** Inject: plugin **0.571** int3 stager ~12 s after launch. Overlay **0.571** `overlay_gate` then CRT; hooks off; pad poll only.
 
 **Wave 1 plugin `:1745` (implemented 2026-08-26, version 0.57):** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. `POST /disarm` keeps `:744` if overlay open. Session web API unchanged. Overlay open must happen **before** `/foreground`/`/read` (plugin `require_dbg`). Injected ELF should `POST /overlay/open` with `getpid()`. Auto-inject lists eboot on `:744` then **disconnects** before `pt_attach`. `POST /overlay/inject` for a manual retry.
 
@@ -560,4 +560,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 5 | **B3** `code_complete`. Hardware: plugin **0.57** elfldr_inject overlay.elf into CUSA13762; game stays up; overlay running toast; poke one value. Overlay spike is not optional. |
+| 5 | **B3** `code_complete`. Hardware: **0.571** injected then running (not the reverse); game stays up; pad poll. Overlay spike is not optional. |

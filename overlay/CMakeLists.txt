@@ -45,6 +45,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 add_executable(overlay
+  source/start.c
   source/main.c
   source/util.c
   source/detour.c
@@ -87,8 +88,13 @@ target_link_libraries(overlay PRIVATE
   kernel_sys
 )
 
-# Stock Johns CRT (_start → __crt_start → main) on a plugin-created pthread.
-# main() must not return (CRT fini) and must not raise the game ucred.
+# overlay_gate is e_entry (TSC wait, then Johns CRT). Keep __crt_start linked.
+# main() must not return and must not raise the game ucred. GNM hooks off in 0.571.
+target_link_options(overlay PRIVATE -Wl,-e,overlay_gate -Wl,-u,__crt_start)
+
+set_source_files_properties(source/start.c PROPERTIES
+  COMPILE_FLAGS "-fno-stack-protector -fno-builtin")
+
 set_target_properties(overlay PROPERTIES
   OUTPUT_NAME "overlay"
   PREFIX ""

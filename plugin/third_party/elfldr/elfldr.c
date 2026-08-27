@@ -601,21 +601,37 @@ elfldr_dlsym(pid_t pid, const char *sym)
 
 
 /**
- * Map ELF and scePthreadCreate the CRT entry. The attached game thread is
- * left alone (no RIP hijack). CRT main() may sleep forever on that pthread.
+ * Map ELF and start CRT on a new pthread via a tiny int3 stager.
+ * Do not pt_call(scePthreadCreate): that single-steps the new thread and
+ * restores the game's regs onto it (0.61 CE-108255-1 after "injected").
  **/
 int
 elfldr_inject(pid_t pid, uint8_t *elf)
 {
+  static const uint8_t stager[] = {
+      0x48, 0x89, 0xfb,             /* mov rbx, rdi */
+      0x48, 0x83, 0xe4, 0xf0,       /* and rsp, -16 */
+      0x48, 0x83, 0xec, 0x08,       /* sub rsp, 8 */
+      0x48, 0x8d, 0x7b, 0x20,       /* lea rdi, [rbx+0x20] */
+      0x31, 0xf6,                   /* xor esi, esi */
+      0x48, 0x8b, 0x53, 0x08,       /* mov rdx, [rbx+0x8] */
+      0x48, 0x8b, 0x4b, 0x10,       /* mov rcx, [rbx+0x10] */
+      0x4c, 0x8b, 0x43, 0x18,       /* mov r8, [rbx+0x18] */
+      0xff, 0x13,                   /* call [rbx] */
+      0xcc                          /* int3 */
+  };
   uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
                           0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   uint8_t orgcaps[16];
   intptr_t entry;
   intptr_t args;
   intptr_t ptc;
-  intptr_t buf;
+  intptr_t page;
+  intptr_t ctx;
+  intptr_t code;
   intptr_t name;
-  long rc;
+  struct reg bak;
+  int status;
 
   if (kernel_get_ucred_caps(pid, orgcaps)) {
     puts("kernel_get_ucred_caps failed");
@@ -644,25 +660,60 @@ elfldr_inject(pid_t pid, uint8_t *elf)
     goto fail;
   }
 
-  if ((buf = pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                     MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+  if ((page = pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
     pt_perror(pid, "pt_mmap");
     goto fail;
   }
-  name = buf + 0x80;
-  pt_setlong(pid, buf, 0);
+  code = page;
+  ctx = page + 0x80;
+  name = page + 0xc0;
+  pt_copyin(pid, stager, code, sizeof stager);
   pt_copyin(pid, "nitepr5", name, 8);
-
-  /* scePthreadCreate(thread, attr, entry, arg, name). pthread_create ignores name. */
-  rc = pt_call(pid, ptc, buf, 0, entry, args, name);
-  if (rc != 0) {
-    puts("scePthreadCreate failed");
+  pt_setlong(pid, ctx + 0x00, ptc);
+  pt_setlong(pid, ctx + 0x08, entry);
+  pt_setlong(pid, ctx + 0x10, args);
+  pt_setlong(pid, ctx + 0x18, name);
+  pt_setlong(pid, ctx + 0x20, 0);
+  if (kernel_mprotect(pid, page, PAGE_SIZE,
+                      PROT_READ | PROT_WRITE | PROT_EXEC)) {
+    puts("kernel_mprotect stager failed");
     goto fail;
   }
 
   if (kernel_set_ucred_caps(pid, orgcaps)) {
     puts("kernel_set_ucred_caps failed");
-    return -1;
+    goto fail_attached;
+  }
+
+  if (pt_getregs(pid, &bak)) {
+    perror("pt_getregs");
+    goto fail_attached;
+  }
+  {
+    struct reg r = bak;
+    r.r_rip = code;
+    r.r_rdi = ctx;
+    if (pt_setregs(pid, &r)) {
+      perror("pt_setregs");
+      goto fail_attached;
+    }
+  }
+  if (pt_continue(pid, 0)) {
+    perror("pt_continue");
+    goto fail_attached;
+  }
+  if (waitpid(pid, &status, 0) < 0) {
+    perror("waitpid");
+    goto fail_attached;
+  }
+  if (!WIFSTOPPED(status) || WSTOPSIG(status) != SIGTRAP) {
+    puts("stager did not trap");
+    goto fail_attached;
+  }
+  if (pt_setregs(pid, &bak)) {
+    perror("pt_setregs restore");
+    goto fail_attached;
   }
   if (pt_detach(pid, SIGCONT)) {
     perror("pt_detach");
@@ -672,6 +723,7 @@ elfldr_inject(pid_t pid, uint8_t *elf)
 
 fail:
   (void)kernel_set_ucred_caps(pid, orgcaps);
+fail_attached:
   (void)pt_detach(pid, SIGCONT);
   return -1;
 }

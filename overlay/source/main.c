@@ -17,16 +17,8 @@
 #define SCE_SYSMODULE_INTERNAL_NET 0x8000001Cu
 #endif
 
-#ifndef PROT_READ
-#define PROT_READ  1
-#define PROT_WRITE 2
-#define PROT_EXEC  4
-#endif
-
 int sceSysmoduleLoadModuleInternal(unsigned int id) __attribute__((weak));
 int sceNetCtlInit(void) __attribute__((weak));
-int sceKernelMprotect(void *addr, size_t len, int prot) __attribute__((weak));
-int kernel_mprotect(int pid, unsigned long addr, unsigned long len, int prot) __attribute__((weak));
 
 static void write_alive(void)
 {
@@ -60,26 +52,6 @@ static void net_init(void)
 #endif
 }
 
-static void mprotect_ready(void)
-{
-    char buf[64];
-    int i;
-
-    memset(buf, 0, sizeof buf);
-    for (i = 0; i < 2; i++) {
-        if (sceKernelMprotect &&
-            sceKernelMprotect(buf, sizeof buf, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
-            return;
-        }
-        if (kernel_mprotect &&
-            kernel_mprotect((int)getpid(), (unsigned long)(uintptr_t)buf, sizeof buf,
-                            PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
-            return;
-        }
-        sleep(1);
-    }
-}
-
 int main(void)
 {
     overlay_state_t *st = overlay_state();
@@ -97,15 +69,10 @@ int main(void)
     net_init();
     (void)overlay_worker_start();
 
-    sleep(5);
-    mprotect_ready();
-
-    if (overlay_hooks_install() != 0) {
-        overlay_lock();
-        overlay_set_error("hook failed (flip/pad)");
-        overlay_unlock();
-        overlay_notify("NitePR5 hook failed — pad poll still on");
-    }
+    /* 0.571: no GNM/pad detours. Pad poll already works; hooks are the
+     * next crash suspect after the pt_call smash is gone.
+     */
+    overlay_notify("NitePR5 pad poll only (hooks off)");
 
     for (;;) {
         sleep(0x4000);
