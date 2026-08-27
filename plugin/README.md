@@ -2,12 +2,12 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.55**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Title ID **NTPR50001**, version **0.56**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
-- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is two-phase `PROC_ELF` (`0xBDAA0007`). Idle (not armed, overlay closed) does **not** hold `:744`.
+- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_exec** (`pt_attach` on eboot, map ELF, push original RIP, `pt_detach`). `:744` is dropped for that window so ps5debug is not tracing. Idle (not armed, overlay closed) does **not** hold `:744`.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.
 - Classic TV toast on start, armed, `:744` missing, overlay injected / missing ELF / inject fail / overlay entry-up vs silent
-- Auto-inject via `PROC_ELF` on the existing `:744` client (no `PT_ATTACH` from this plugin)
+- Auto-inject via Johns elfldr (etaHEN FPS path). Attach/detach is **only** the inject window. Game R/W is still `:744`. Not NineS, not PROC_ELF, not elfldr **9021**.
 
 ## Install
 
@@ -20,7 +20,7 @@ Do **not** send this file to elfldr **9021** (that port is for one-shot ELFs lik
 3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback: `/data/etaHEN/plugins/overlay.elf`.
 4. Enable or **kill then run** from the etaHEN Toolbox (title **NTPR50001**).
 5. Load **ps5debug-NG** on elfldr **9021** (already required for the editor).
-6. Launch a CUSA/PPSA title. After ~12 s the TV should toast **overlay injected**, then **overlay entry is up**. **L1+R1+Touchpad** opens the HUD. The title must keep booting.
+6. Launch a CUSA/PPSA title. After ~12 s the TV should toast **overlay injected**, then **overlay running** and **overlay entry is up**. **L1+R1+Touchpad** opens the HUD. The title must keep booting.
 
 Plugins are already jailbroken; do not call IPC 9028. Do not send `overlay.elf` to **9021** (that starts a new process with no game pad or framebuffer).
 
@@ -58,7 +58,7 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 | POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
 | POST | `/overlay/open` | `{pid?}` else stored pid; connect `:744`; does not require armed |
 | POST | `/overlay/close` | `overlay_open=false`; clear watches; disconnect if not armed |
-| POST | `/overlay/inject` | map `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
+| POST | `/overlay/inject` | Johns elfldr_exec of `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
 | GET | `/read` | query `addr`, `n?=512`, `pid?` → `{addr, n, data}` hex; `n` 1..4096 |
 | POST | `/write` | `{addr, data, pid?}` two-phase PROC_WRITE; data 1..4096 B |
 | GET | `/maps` | `{maps:[{name,start,end,offset,prot}]}` metadata only |
@@ -75,3 +75,5 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 | GET | `/cheat` | `{cheat:{name,id,version,process,mods:[{name}]}, enabled}` or `cheat` null |
 
 Freeze cap 32, data 1–8 bytes. Watch cap 64. The 33rd freeze / 65th watch is HTTP 400. No turbo scan in the plugin. No second `:744` client.
+
+cJSON 1.7.17 is MIT, vendored under `third_party/cjson/`. Johns elfldr/pt (GPL-3, John Törnblom) is vendored under `third_party/elfldr/` for B3 inject only (`elfldr_spawn` compiled out).

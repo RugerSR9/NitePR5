@@ -43,7 +43,7 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "[Cc]lang")
 endif()
 
 set(PLUGIN_TITLE_ID "NTPR50001")
-set(PLUGIN_VERSION "0.55")
+set(PLUGIN_VERSION "0.56")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -58,11 +58,14 @@ add_executable(nitepr5
   source/fs_state.c
   source/inject.c
   third_party/cjson/cJSON.c
+  third_party/elfldr/pt.c
+  third_party/elfldr/elfldr.c
 )
 
 target_include_directories(nitepr5 PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/elfldr"
 )
 
 if(PS5_PAYLOAD_SDK)
@@ -73,9 +76,11 @@ target_compile_definitions(nitepr5 PRIVATE
   PLUGIN_TITLE_ID="${PLUGIN_TITLE_ID}"
   PLUGIN_VERSION="${PLUGIN_VERSION}"
   CJSON_HIDE_SYMBOLS
+  NITEPR5_ELFLDR_INJECT_ONLY
 )
 
 # utility_daemon link set. No hijacker, no ScePad.
+# kernel + kernel_sys: Johns elfldr (kernel_mprotect / overlap_sockets) for B3 inject.
 target_link_libraries(nitepr5 PRIVATE
   SceLibcInternal
   SceSystemService
@@ -83,6 +88,7 @@ target_link_libraries(nitepr5 PRIVATE
   SceSysmodule
   SceUserService
   SceNetCtl
+  kernel
   kernel_sys
 )
 
@@ -97,7 +103,7 @@ set_target_properties(nitepr5 PROPERTIES
 add_custom_command(TARGET nitepr5 POST_BUILD
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_plugin.py"
           "$<TARGET_FILE:nitepr5>" "${PLUGIN_TITLE_ID}" "${PLUGIN_VERSION}"
-  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.55)"
+  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.56)"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   VERBATIM
 )

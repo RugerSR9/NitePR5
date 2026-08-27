@@ -30,7 +30,7 @@ Product: NitePR5 (PSP NitePR is namesake only). Jailbroken PS5 FW 9.60, etaHEN o
 Read: AGENTS.md, docs/ARCHITECTURE.md §3 constraints + §5.1 session API + §5.3 performance, docs/STATUS.md.
 
 Hard rules:
-- Use Python ps5dbg. Do not reimplement ps5debug-NG. Do not PT_ATTACH / ptrace a game.
+- Use Python ps5dbg. Do not reimplement ps5debug-NG. Do not PT_ATTACH / ptrace a game for editor R/W. Phase 5 B3 plugin inject (Johns elfldr, inject window only) is the documented exception.
 - etaHEN plugins cannot draw ShellUI overlays. Do not start plugin/ or overlay/ unless this brief says so.
 - Performance: turbo scan on-console; UI gets counts; max 256 result rows; watch ≤64 @ ~10Hz; hex ≤512B default @ ~4Hz; freeze ≤32 @ 15Hz. Never dump or poll all RAM.
 - Localhost web on port 1744. GoldHEN JSON cheats only.
@@ -177,7 +177,7 @@ Do not spawn unless the user asks. Backlog is in ARCHITECTURE.md.
 
 1. Prefer workers that touched disjoint paths.
 2. If two diffs hit `web/app.py`, orchestrator rebases — do not tell both to “just commit.”
-3. Reject PRs/diffs that: add SHN/MC4, add `PT_ATTACH`, scan All by default, fetch unbounded results, create `overlay/` before phase 5.
+3. Reject PRs/diffs that: add SHN/MC4, add `PT_ATTACH` for editor R/W or from overlay.elf, scan All by default, fetch unbounded results, create `overlay/` before phase 5. Plugin B3 Johns elfldr inject is allowed.
 4. Append a row to `docs/STATUS.md` session log.
 5. Tell the user what hardware step (if any) they must run.
 

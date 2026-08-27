@@ -48,8 +48,8 @@ int dbg_proc_write(uint32_t pid, uint64_t addr, const uint8_t *data, uint32_t le
 int dbg_proc_read(uint32_t pid, uint64_t addr, uint8_t *out, uint32_t length);
 
 /* Two-phase PROC_ELF (ps5debug-NG PROTOCOL.md): 8-byte <II pid,length> then ACK,
- * then ELF bytes, then FINAL. Maps into the target as a remote thread — not PT_ATTACH
- * from this plugin. length 16..DBG_ELF_MAX. Must be a 64-bit ELF.
+ * then ELF bytes, then FINAL. Unused for overlay inject (Johns elfldr_exec).
+ * Kept so the :744 client still matches PROTOCOL.md. length 16..DBG_ELF_MAX.
  */
 int dbg_proc_elf(uint32_t pid, const uint8_t *elf, uint32_t length);
 

@@ -1,13 +1,18 @@
-/* Inject overlay.elf into the running game via ps5debug-NG PROC_ELF.
- * Game detect uses SceSystemService (no :744). Mapping uses the existing
- * localhost :744 client.
+/* Inject overlay.elf into the running game via Johns elfldr (etaHEN FPS path).
+ * Game detect uses SceSystemService. eboot pid comes from :744 PROC_LIST, then
+ * the socket is dropped so ps5debug is not tracing. pt_attach + elfldr_exec
+ * maps the ELF, pushes original RIP, jumps CRT, detaches. Game R/W stays on
+ * :744 after the inject window. Not PROC_ELF, not NineS, not elfldr 9021.
  */
 
 #include "inject.h"
 #include "dbg_client.h"
 #include "nitepr5.h"
 #include "notify.h"
+#include "elfldr.h"
+#include "pt.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -192,6 +197,17 @@ static void dbg_release_if_idle(void)
     }
 }
 
+static void dbg_restore_after_inject(int held)
+{
+    nitepr5_state_t *st = nitepr5_state();
+
+    if (held || st->armed || st->overlay_open) {
+        st->dbg = dbg_ensure() == 0 ? 1 : 0;
+    } else {
+        st->dbg = 0;
+    }
+}
+
 uint32_t inject_pid(void)
 {
     return g_injected_pid;
@@ -241,14 +257,21 @@ int inject_now(void)
         return INJECT_ALREADY;
     }
 
-    rc = dbg_proc_elf(pid, elf, elf_n);
+    /* ps5debug must not be tracing eboot or PT_ATTACH fails. */
+    dbg_disconnect();
+    st->dbg = 0;
+
+    if (pt_attach((pid_t)pid) != 0) {
+        free(elf);
+        dbg_restore_after_inject(held);
+        return INJECT_FAIL;
+    }
+
+    rc = elfldr_exec((pid_t)pid, elf);
     free(elf);
     if (rc != 0) {
-        if (!held) {
-            dbg_release_if_idle();
-        } else {
-            st->dbg = dbg_connected() ? 1 : 0;
-        }
+        (void)pt_detach((pid_t)pid, SIGCONT);
+        dbg_restore_after_inject(held);
         return INJECT_FAIL;
     }
 
@@ -258,11 +281,7 @@ int inject_now(void)
     if (st->pid == 0) {
         st->pid = pid;
     }
-    if (!held) {
-        dbg_release_if_idle();
-    } else {
-        st->dbg = dbg_connected() ? 1 : 0;
-    }
+    dbg_restore_after_inject(held);
     return INJECT_OK;
 }
 

@@ -58,7 +58,9 @@ etaHEN’s FPS counter is a **third** path: libhijacker injects `/data/etaHEN/fp
 
 ps5debug-NG runs inside `SceShellCore` so `PT_ATTACH` looks like an SCE debug attach. A standalone payload that attaches itself will flag the game (AppContext) and the title stops progressing.
 
-**Consequence:** all process R/W and scanning go through PS5Debug. Do not attach for v1. Pause-the-game (thread suspend) is a later feature that uses the debugger namespace on purpose.
+**Consequence:** all process R/W and scanning go through PS5Debug. Do not attach for the editor path. Pause-the-game (thread suspend) is a later feature that uses the debugger namespace on purpose.
+
+**Phase 5 B3 exception (2026-08-27):** overlay inject from the already-jailbroken etaHEN plugin **NTPR50001** uses Johns `pt_attach` + `elfldr_exec` for the inject window only (same pattern as etaHEN FPS `Inject_Toolbox`). Game R/W after that is still `:744`. Do not `PT_ATTACH` from overlay.elf, from the PC, or from a second payload.
 
 ### 3.3 Scan state is per TCP connection
 
@@ -384,7 +386,7 @@ If both spikes fail, keep Phase 3+4 as the product and park overlay.
 
 - Writes require an explicit confirm in the web UI. Overlay pokes are smaller and still require X to commit.
 - Default bind: web on localhost; PS5Debug already LAN-only.
-- Do not enable `PT_ATTACH` until a dedicated pause feature exists.
+- Do not enable `PT_ATTACH` for editor R/W or pause until a dedicated pause feature exists. Phase 5 B3 inject from NTPR50001 (Johns elfldr, inject window only) is the documented exception.
 - Wrong writes crash games and can corrupt saves. Test on titles you can reinstall.
 - Local / single-player / research on hardware you own. Not for online play.
 
@@ -419,3 +421,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-26 | Phase 5 Wave 2 source complete: B3 in-game ELF in `overlay/` (VideoOut composite HUD, DualSense, `:1745` client). Hardware exit not run. |
 | 2026-08-26 | Plugin 0.51 auto-injects `overlay.elf` into `eboot.bin` at CUSA/PPSA launch via ps5debug-NG `PROC_ELF` (`0xBDAA0007`). No NineS, no second Toolbox plugin, no `PT_ATTACH` from NTPR50001. |
 | 2026-08-27 | Overlay 0.55: hijacked PROC_ELF thread only writes a heartbeat (checked `sys_dynlib_dlsym` + `sceKernelOpen`) then RETs. 0.54 CE-108255-1 from `__crt_syscall` / `thr_new` / TLS `scePthreadCreate` / garbage dlsym. HUD still needs a later spawn from a real game pthread. |
+| 2026-08-27 | Overlay spike is **not optional**. PROC_ELF is the wrong run primitive (maps ELF, hijacks RIP, no stacked return). Plugin **0.56** uses Johns websrv `pt_attach` + `elfldr_exec` (push original RIP). Overlay **0.56** stock CRT; `main()` returns after `pthread_create(overlay_boot)`. Game R/W remains `:744`. No NineS, no elfldr 9021 for overlay. |

@@ -1,6 +1,7 @@
 /* NitePR5 etaHEN plugin daemon. Freeze/cheats on-console; B3 overlay I/O and
- * auto-inject of overlay.elf via PROC_ELF. Already jailbroken — do not call
- * IPC 9028. Writes only via 127.0.0.1:744. No ShellUI, no pad, no libhijacker.
+ * auto-inject of overlay.elf via Johns elfldr (FPS path). Already jailbroken —
+ * do not call IPC 9028. Game R/W only via 127.0.0.1:744. No ShellUI, no pad,
+ * no libhijacker, no NineS.
  */
 
 #include "nitepr5.h"
