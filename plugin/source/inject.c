@@ -223,6 +223,7 @@ int inject_now(void)
     st->dbg = 1;
 
     (void)unlink(OVERLAY_ALIVE_PATH);
+    (void)unlink(OVERLAY_ALIVE_PATH_TMP);
 
     pid = find_eboot_pid();
     if (pid == 0) {
@@ -316,7 +317,8 @@ void inject_poll(void)
         if (!g_alive_told && g_alive_due_ms != 0 && t >= g_alive_due_ms) {
             g_alive_told = 1;
             g_alive_due_ms = 0;
-            if (stat(OVERLAY_ALIVE_PATH, &st) == 0 && st.st_size > 0) {
+            if ((stat(OVERLAY_ALIVE_PATH, &st) == 0 && st.st_size > 0) ||
+                (stat(OVERLAY_ALIVE_PATH_TMP, &st) == 0 && st.st_size > 0)) {
                 notify_overlay_alive();
             } else {
                 notify_overlay_silent();

@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 #define NITEPR5_TITLE_ID "NTPR50001"
-#define NITEPR5_VERSION  "0.53"
+#define NITEPR5_VERSION  "0.54"
 #define NITEPR5_BASENAME "nitepr5"
 
 #define NITEPR5_HTTP_PORT 1745
@@ -42,6 +42,7 @@
 #define OVERLAY_ELF_PATH "/data/nitepr5/overlay.elf"
 #define OVERLAY_ELF_ALT  "/data/etaHEN/plugins/overlay.elf"
 #define OVERLAY_ALIVE_PATH "/data/nitepr5/overlay.alive"
+#define OVERLAY_ALIVE_PATH_TMP "/tmp/nitepr5.overlay.alive"
 
 #define EBOOT_NAME          "eboot.bin"
 #define EXECUTABLE_MAP_NAME "executable"

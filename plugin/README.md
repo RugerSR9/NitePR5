@@ -2,7 +2,7 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.53**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Title ID **NTPR50001**, version **0.54**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
 - Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is two-phase `PROC_ELF` (`0xBDAA0007`). Idle (not armed, overlay closed) does **not** hold `:744`.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.

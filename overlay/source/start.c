@@ -1,20 +1,19 @@
-/* PROC_ELF e_entry. The hijacked game thread must return immediately.
- * 0.52 ran kernel_init/CRT/for(;;) on that thread — boot froze, alive
- * file never appeared. Spawn a new thread for CRT; do not import libc
- * (PLT is unbound until rtld).
+/* PROC_ELF e_entry. Hijacked game thread must RET (0.52 parked it → freeze).
+ * args+0 is sys_dynlib_dlsym (syscall), not libc pthread_create. 0.53 spawn
+ * failed so the worker never ran (silent, game booted). Init syscalls, then
+ * scePthreadCreate / thr_new. Do not import libc (PLT unbound).
  */
 
 #include <stddef.h>
 
 typedef int (*dlsym_fn)(int handle, const char *name, void *out);
 typedef int (*notify_fn)(int device, void *req, unsigned long size, int unk);
-typedef int (*open_fn)(const char *path, int flags, int mode);
-typedef long (*write_fn)(int fd, const void *buf, unsigned long n);
-typedef int (*close_fn)(int fd);
 typedef int (*getpid_fn)(void);
 typedef int (*pthread_create_fn)(void *thread, void *attr, void *(*entry)(void *), void *arg);
 typedef int (*sce_pthread_create_fn)(void *thread, void *attr, void *(*entry)(void *), void *arg,
                                      const char *name);
+typedef int (*sce_attr_init_fn)(void *attr);
+typedef int (*sce_attr_stack_fn)(void *attr, unsigned long size);
 
 typedef struct overlay_args {
     dlsym_fn dynlib_dlsym;
@@ -30,15 +29,43 @@ typedef struct notify_request {
     char message[3075];
 } notify_request_t;
 
+typedef struct thr_param {
+    void (*start_func)(void *);
+    void *arg;
+    char *stack_base;
+    unsigned long stack_size;
+    char *tls_base;
+    unsigned long tls_size;
+    long *child_tid;
+    long *parent_tid;
+    int flags;
+    void *rtp;
+} thr_param_t;
+
 int __crt_syscall_init(void *args) __attribute__((weak));
+long __crt_syscall(long sysno, ...) __attribute__((weak));
 int __kernel_init(void *args) __attribute__((weak));
 int __crt_start(void *args);
 int kernel_set_ucred_authid(int pid, unsigned long authid) __attribute__((weak));
 int kernel_set_ucred_caps(int pid, unsigned char caps[16]) __attribute__((weak));
 
-#define OVERLAY_ALIVE_PATH "/data/nitepr5/overlay.alive"
-#define O_WRONLY_CREAT_TRUNC 0x601 /* FreeBSD O_WRONLY|O_CREAT|O_TRUNC */
-#define ALIVE_MODE 0666
+#define OVERLAY_ALIVE_PATH     "/data/nitepr5/overlay.alive"
+#define OVERLAY_ALIVE_PATH_TMP "/tmp/nitepr5.overlay.alive"
+#define O_WRONLY_CREAT_TRUNC   0x601
+#define ALIVE_MODE             0666
+#define SYS_write              4
+#define SYS_open               5
+#define SYS_close              6
+#define SYS_mmap               477
+#define SYS_thr_new            455
+#define SYS_sprx_dlsym         591
+#define MAP_ANON_PRIVATE       0x1002
+#define PROT_READ_WRITE        3
+#define STACK_SIZE             (256u * 1024u)
+
+static const int k_handles[] = {
+    0x1, 0x2001, 0x2, 0x2002, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0
+};
 
 static void zero_bytes(void *p, unsigned long n)
 {
@@ -71,11 +98,34 @@ static void *resolve(overlay_args_t *args, int handle, const char *name)
 {
     void *fn = 0;
 
-    if (args == NULL || args->dynlib_dlsym == NULL || name == NULL) {
+    if (name == NULL) {
         return NULL;
     }
-    args->dynlib_dlsym(handle, name, &fn);
+    if (args != NULL && args->dynlib_dlsym != NULL) {
+        (void)args->dynlib_dlsym(handle, name, &fn);
+        if (fn) {
+            return fn;
+        }
+    }
+    if (__crt_syscall) {
+        fn = 0;
+        (void)__crt_syscall(SYS_sprx_dlsym, handle, name, &fn);
+    }
     return fn;
+}
+
+static void *resolve_any(overlay_args_t *args, const char *name)
+{
+    int i;
+    void *fn;
+
+    for (i = 0; k_handles[i]; i++) {
+        fn = resolve(args, k_handles[i], name);
+        if (fn) {
+            return fn;
+        }
+    }
+    return NULL;
 }
 
 static void raw_notify(overlay_args_t *args, const char *msg)
@@ -83,10 +133,7 @@ static void raw_notify(overlay_args_t *args, const char *msg)
     notify_fn fn;
     notify_request_t req;
 
-    fn = (notify_fn)resolve(args, 0x2001, "sceKernelSendNotificationRequest");
-    if (fn == NULL) {
-        fn = (notify_fn)resolve(args, 0x1, "sceKernelSendNotificationRequest");
-    }
+    fn = (notify_fn)resolve_any(args, "sceKernelSendNotificationRequest");
     if (fn == NULL) {
         return;
     }
@@ -95,35 +142,26 @@ static void raw_notify(overlay_args_t *args, const char *msg)
     (void)fn(0, &req, sizeof req, 0);
 }
 
-static void write_alive(overlay_args_t *args)
+static void write_alive_path(const char *path)
 {
-    open_fn op;
-    write_fn wr;
-    close_fn cl;
-    int fd;
-    const char *body = "1\n";
+    long fd;
 
-    op = (open_fn)resolve(args, 0x2, "open");
-    wr = (write_fn)resolve(args, 0x2, "write");
-    cl = (close_fn)resolve(args, 0x2, "close");
-    if (op == NULL) {
-        op = (open_fn)resolve(args, 0x1, "open");
-    }
-    if (wr == NULL) {
-        wr = (write_fn)resolve(args, 0x1, "write");
-    }
-    if (cl == NULL) {
-        cl = (close_fn)resolve(args, 0x1, "close");
-    }
-    if (op == NULL || wr == NULL || cl == NULL) {
+    if (__crt_syscall == NULL || path == NULL) {
         return;
     }
-    fd = op(OVERLAY_ALIVE_PATH, O_WRONLY_CREAT_TRUNC, ALIVE_MODE);
+    fd = __crt_syscall(SYS_open, path, O_WRONLY_CREAT_TRUNC, ALIVE_MODE);
     if (fd < 0) {
         return;
     }
-    (void)wr(fd, body, 2);
-    (void)cl(fd);
+    (void)__crt_syscall(SYS_write, fd, "1\n", 2);
+    (void)__crt_syscall(SYS_close, fd);
+}
+
+static void write_alive(overlay_args_t *args)
+{
+    (void)args;
+    write_alive_path(OVERLAY_ALIVE_PATH);
+    write_alive_path(OVERLAY_ALIVE_PATH_TMP);
 }
 
 static void raise_caps(overlay_args_t *args)
@@ -137,12 +175,14 @@ static void raise_caps(overlay_args_t *args)
         caps[i] = 0xff;
     }
     pid = 0;
-    gp = (getpid_fn)resolve(args, 0x1, "getpid");
-    if (gp == NULL) {
-        gp = (getpid_fn)resolve(args, 0x2001, "getpid");
+    if (__crt_syscall) {
+        pid = (int)__crt_syscall(20);
     }
-    if (gp) {
-        pid = gp();
+    if (pid <= 0) {
+        gp = (getpid_fn)resolve_any(args, "getpid");
+        if (gp) {
+            pid = gp();
+        }
     }
     if (pid <= 0) {
         return;
@@ -160,9 +200,6 @@ static void *overlay_thread(void *arg)
     overlay_args_t *args = (overlay_args_t *)arg;
 
     write_alive(args);
-    if (__crt_syscall_init) {
-        (void)__crt_syscall_init(args);
-    }
     if (__kernel_init && __kernel_init(args) == 0) {
         raise_caps(args);
         write_alive(args);
@@ -175,21 +212,69 @@ static void *overlay_thread(void *arg)
     return NULL;
 }
 
-static int spawn_overlay_thread(overlay_args_t *args)
+static void overlay_thr_entry(void *arg)
 {
-    pthread_create_fn pc;
-    sce_pthread_create_fn sce;
-    void *th = 0;
+    (void)overlay_thread(arg);
+}
 
-    pc = (pthread_create_fn)resolve(args, 0x2, "pthread_create");
+static int spawn_pthread(overlay_args_t *args)
+{
+    sce_pthread_create_fn sce;
+    pthread_create_fn pc;
+    sce_attr_init_fn attr_init;
+    sce_attr_stack_fn attr_stack;
+    unsigned char attr[256];
+    void *th = 0;
+    void *attrp = NULL;
+
+    sce = (sce_pthread_create_fn)resolve_any(args, "scePthreadCreate");
+    attr_init = (sce_attr_init_fn)resolve_any(args, "scePthreadAttrInit");
+    attr_stack = (sce_attr_stack_fn)resolve_any(args, "scePthreadAttrSetstacksize");
+    if (sce != NULL) {
+        zero_bytes(attr, sizeof attr);
+        if (attr_init && attr_init(attr) == 0) {
+            if (attr_stack) {
+                (void)attr_stack(attr, STACK_SIZE);
+            }
+            attrp = attr;
+        }
+        if (sce(&th, attrp, overlay_thread, args, "NitePR5ov") == 0) {
+            return 0;
+        }
+        if (attrp != NULL && sce(&th, NULL, overlay_thread, args, "NitePR5ov") == 0) {
+            return 0;
+        }
+    }
+    pc = (pthread_create_fn)resolve_any(args, "pthread_create");
     if (pc != NULL && pc(&th, NULL, overlay_thread, args) == 0) {
         return 0;
     }
-    sce = (sce_pthread_create_fn)resolve(args, 0x1, "scePthreadCreate");
-    if (sce == NULL) {
-        sce = (sce_pthread_create_fn)resolve(args, 0x2001, "scePthreadCreate");
+    return -1;
+}
+
+static int spawn_thr_new(overlay_args_t *args)
+{
+    thr_param_t p;
+    long stack;
+    long child = 0;
+    long parent = 0;
+
+    if (__crt_syscall == NULL) {
+        return -1;
     }
-    if (sce != NULL && sce(&th, NULL, overlay_thread, args, "NitePR5") == 0) {
+    stack = __crt_syscall(SYS_mmap, 0, (long)STACK_SIZE, PROT_READ_WRITE, MAP_ANON_PRIVATE, -1, 0);
+    if (stack <= 0) {
+        return -1;
+    }
+    zero_bytes(&p, sizeof p);
+    p.start_func = overlay_thr_entry;
+    p.arg = args;
+    p.stack_base = (char *)(unsigned long)stack;
+    p.stack_size = STACK_SIZE;
+    p.child_tid = &child;
+    p.parent_tid = &parent;
+    p.flags = 0;
+    if (__crt_syscall(SYS_thr_new, &p, (long)sizeof p) == 0) {
         return 0;
     }
     return -1;
@@ -200,7 +285,13 @@ int overlay_start(overlay_args_t *args)
 {
     /* Jump, not call: RET resumes the interrupted game frame. Do not hang. */
     if (args != NULL) {
-        (void)spawn_overlay_thread(args);
+        if (__crt_syscall_init) {
+            (void)__crt_syscall_init(args);
+        }
+        write_alive(args);
+        if (spawn_pthread(args) != 0) {
+            (void)spawn_thr_new(args);
+        }
     }
     return 0;
 }
