@@ -15,7 +15,7 @@ Phases **0–4 are `done`** on hardware. **Phase 5 is `code_complete` (B3)** —
 | Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
 | Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
-| Phase 5 | **B3** `code_complete`. Plugin 0.54 + overlay 0.54 `scePthreadCreate`/`thr_new`. Hardware: 0.53 silent, game booted. |
+| Phase 5 | **B3** `code_complete`. Overlay 0.55 hijack RET only (0.54 CE-108255-1). Plugin 0.55. |
 
 ### Phase 4 locked contract (user 2026-08-25)
 
@@ -53,11 +53,11 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.54** auto-injects `/data/nitepr5/overlay.elf` into `eboot.bin` via ps5debug-NG `PROC_ELF` (~12 s after CUSA/PPSA launch). Overlay **0.54** `overlay_start` inits Johns syscalls, spawns via `scePthreadCreate`/`thr_new`, then RETs. 0.53 libc `pthread_create` never resolved. CI: `nitepr5.plugin` and `overlay.elf`. Do not send either to elfldr **9021**.
+Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.55** auto-injects `/data/nitepr5/overlay.elf` via `PROC_ELF` (~12 s). Overlay **0.55** `overlay_start` only writes a heartbeat (checked `sys_dynlib_dlsym` + `sceKernelOpen`) then RETs. 0.54 CE-108255-1: do not `__crt_syscall` / `thr_new` / `scePthreadCreate` on the hijacked thread. CI: `nitepr5.plugin` and `overlay.elf`. Do not send either to elfldr **9021**.
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NTPR50001 / **0.54**. HTTP :1745. Two-phase PROC_WRITE + one-phase PROC_READ + two-phase PROC_ELF to 127.0.0.1:744. After inject, plugin stats `/data/nitepr5/overlay.alive` or `/tmp/nitepr5.overlay.alive` (~5 s) and toasts entry-up vs silent. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
+`plugin/` exists. Title NTPR50001 / **0.55**. HTTP :1745. Two-phase PROC_WRITE + one-phase PROC_READ + two-phase PROC_ELF to 127.0.0.1:744. After inject, plugin stats `/data/nitepr5/overlay.alive` or `/tmp/nitepr5.overlay.alive` (~5 s) and toasts entry-up vs silent. ELF is built in GitHub Actions (`bash plugin/build.sh`), not on this Windows PC.
 
 `make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
 
@@ -77,9 +77,9 @@ User: full on-TV editor (Live / Watch / Freeze / Cheats / related views). No tur
 
 **Kill B3 if:** inject fails on CUSA13762; flip never fires; ELF cannot connect `:1745`; no readable translucent panel in the spike budget.
 
-**Wave 2 overlay (source 2026-08-26):** `overlay/` fps_elf-shaped ELF (not `.plugin`). HTTP client **127.0.0.1:1745** only. GNM flip tick + VideoOut buffer composite (translucent panel). DualSense: L1+R1+Touchpad open/close; Cross poke confirm; Circle cancel. Views Live/Watch/Freeze/Cheats. Freeze tick stays in the plugin. Inject: plugin **0.54** `PROC_ELF` of `/data/nitepr5/overlay.elf` into `eboot.bin` ~12 s after game launch (fallback `/data/etaHEN/plugins/overlay.elf`). Overlay **0.54** e_entry is `overlay_start` (Johns syscall init, `scePthreadCreate`/`thr_new`, then RET; worker raises ucred + Johns `__crt_start`). Kill if HUD blank (buffers registered before inject) or `:1745` blocked.
+**Wave 2 overlay (source 2026-08-26):** `overlay/` fps_elf-shaped ELF (not `.plugin`). HTTP client **127.0.0.1:1745** only. Inject: plugin **0.55** `PROC_ELF` ~12 s after launch. Overlay **0.55** e_entry RETs after a checked-dlsym heartbeat — no pthread/`thr_new`/`__crt_syscall` on the hijacked thread (0.54 = CE-108255-1). HUD spawn is still unsolved (needs a real game pthread, like etaHEN FPS `SuspendApp` + Inject_Toolbox).
 
-**Wave 1 plugin `:1745` (implemented 2026-08-26, version 0.54):** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. `POST /disarm` keeps `:744` if overlay open. Session web API unchanged. Overlay open must happen **before** `/foreground`/`/read` (plugin `require_dbg`). Injected ELF should `POST /overlay/open` with `getpid()`. Auto-inject uses the same `:744` client (brief connect if idle). `POST /overlay/inject` for a manual retry.
+**Wave 1 plugin `:1745` (implemented 2026-08-26, version 0.55):** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. `POST /disarm` keeps `:744` if overlay open. Session web API unchanged. Overlay open must happen **before** `/foreground`/`/read` (plugin `require_dbg`). Injected ELF should `POST /overlay/open` with `getpid()`. Auto-inject uses the same `:744` client (brief connect if idle). `POST /overlay/inject` for a manual retry.
 
 ### Last live incident (fixed; hardware re-verified 2026-08-25)
 

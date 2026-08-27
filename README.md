@@ -8,7 +8,7 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 ## Status
 
-Phases 0–4 are **done**. Phase 5 overlay is **code-complete** (not hardware-verified): plugin **NTPR50001** 0.54 auto-injects `overlay.elf` at game launch. The web UI is the shippable PC editor; the plugin owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phases 0–4 are **done**. Phase 5 overlay is **code-complete** (not hardware-verified): plugin **NTPR50001** 0.55 auto-injects `overlay.elf` at game launch. The web UI is the shippable PC editor; the plugin owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -106,7 +106,7 @@ If a First Scan reports too many matches, pick a **less common** in-game value a
 
 ## Plugin daemon
 
-The etaHEN plugin (title **NTPR50001**, version **0.54**) owns freeze and cheats when armed so they keep applying with the web UI closed. From **0.51** it also injects `overlay.elf` into the launching game via `PROC_ELF`. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
+The etaHEN plugin (title **NTPR50001**, version **0.55**) owns freeze and cheats when armed so they keep applying with the web UI closed. From **0.51** it also injects `overlay.elf` into the launching game via `PROC_ELF`. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
 
 | How | Where to download |
 |---|---|

@@ -418,4 +418,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-26 | Phase 5 backend is **B3** (in-game ELF). **B2 is dead** (Toolbox fork). Overlay is a full TV editor (Live/Watch/Freeze/Cheats); scans stay on the PC. Overlay talks to plugin `:1745` only. |
 | 2026-08-26 | Phase 5 Wave 2 source complete: B3 in-game ELF in `overlay/` (VideoOut composite HUD, DualSense, `:1745` client). Hardware exit not run. |
 | 2026-08-26 | Plugin 0.51 auto-injects `overlay.elf` into `eboot.bin` at CUSA/PPSA launch via ps5debug-NG `PROC_ELF` (`0xBDAA0007`). No NineS, no second Toolbox plugin, no `PT_ATTACH` from NTPR50001. |
-| 2026-08-27 | Overlay 0.54: `args+0` is `sys_dynlib_dlsym`, not libc `pthread_create`. 0.53 spawn failed (silent, game booted). Entry inits Johns syscalls, `scePthreadCreate` handle sweep, `thr_new` fallback, `SYS_open` heartbeat to `/data` and `/tmp`. |
+| 2026-08-27 | Overlay 0.55: hijacked PROC_ELF thread only writes a heartbeat (checked `sys_dynlib_dlsym` + `sceKernelOpen`) then RETs. 0.54 CE-108255-1 from `__crt_syscall` / `thr_new` / TLS `scePthreadCreate` / garbage dlsym. HUD still needs a later spawn from a real game pthread. |

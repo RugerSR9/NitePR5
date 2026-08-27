@@ -29,7 +29,7 @@ Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If y
 
 ### One-time setup
 
-1. CI: download `nitepr5.plugin` (**0.54**) and `overlay.elf`.
+1. CI: download `nitepr5.plugin` (**0.55**) and `overlay.elf`.
 2. Copy the plugin to USB `<usb>/etaHEN/plugins/` or `/data/etaHEN/plugins/`.
 3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback path: `/data/etaHEN/plugins/overlay.elf`.
 4. Toolbox: kill/run **NTPR50001**.

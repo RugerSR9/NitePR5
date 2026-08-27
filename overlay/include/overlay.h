@@ -11,7 +11,7 @@
 /* B3 in-game ELF. Memory R/W is HTTP to NTPR50001 :1745 only — never :744. */
 
 #define OVERLAY_NAME     "NitePR5"
-#define OVERLAY_VERSION  "0.54"
+#define OVERLAY_VERSION  "0.55"
 #define PLUGIN_HOST      "127.0.0.1"
 #define PLUGIN_PORT      1745
 

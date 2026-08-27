@@ -7,9 +7,8 @@ product: NitePR5
 active_phase: 5
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-26
-# Phase 5 B3 overlay 0.54: sys_dynlib_dlsym + scePthreadCreate/thr_new (0.53
-# libc pthread_create failed → silent, game booted). Plugin 0.54 heartbeat
-# /data and /tmp. Overlay talks to :1745.
+# Phase 5 B3 overlay 0.55: PROC_ELF thread RET only (0.54 CE-108255-1 from
+# __crt_syscall/thr_new/pthread). Heartbeat via checked dlsym open. :1745.
 # Plugin injects overlay.elf at CUSA/PPSA launch via PROC_ELF.
 # Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
 # GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
@@ -25,12 +24,12 @@ last_updated: 2026-08-26
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | code_complete | **B3**. Plugin 0.54 + overlay 0.54 scePthreadCreate/thr_new. Hardware: 0.53 silent, game booted. |
+| 5 Overlay spike | code_complete | **B3**. Overlay 0.55 hijack RET only (0.54 CE-108255-1). Plugin 0.55 heartbeat. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (**0.54**) + `overlay.elf` to `/data/nitepr5/overlay.elf`; Toolbox NTPR50001; ps5debug-NG on 9021; launch CUSA13762; wait ~12 s; toast **overlay injected**, then **overlay entry is up** (or **overlay silent**); game must keep booting; L1+R1+Touchpad; poke one Live value. If the HUD is blank (VideoOut buffers registered before inject), that is a spike kill — not a toast fallback.
+- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (**0.55**) + `overlay.elf` to `/data/nitepr5/overlay.elf`; Toolbox NTPR50001; ps5debug-NG on 9021; launch CUSA13762; wait ~12 s; toast **overlay injected**; game must **not** CE-108255-1; then **overlay entry is up** or **silent**; L1+R1+Touchpad. HUD still not expected until a later spawn from a real game pthread.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
@@ -91,3 +90,4 @@ last_updated: 2026-08-26
 | 2026-08-26 | orchestrator | User: no overlay toasts, only plugin inject toast. PROC_ELF maps ELF but Johns CRT never reached main(); PROC_ELF restores game ucred before jump. Overlay 0.52 `overlay_start` e_entry: raise caps, `/data/nitepr5/overlay.alive`, toast, then `__crt_start`. Plugin 0.52 heartbeat toast. |
 | 2026-08-26 | orchestrator | User: 0.52 **silent (never started)** and game froze while booting. Hijacked thread ran kernel_init/CRT/`for(;;)` instead of returning. Overlay 0.53: pthread_create then RET. Plugin 0.53 inject ~12 s, alive wait 5 s. |
 | 2026-08-27 | orchestrator | User: 0.53 silent again, game booted. libc `pthread_create` at handle 0x2 never resolved (`args+0` is `sys_dynlib_dlsym`). Overlay 0.54: Johns syscall init, `scePthreadCreate` handle sweep, `thr_new` fallback, heartbeat via `SYS_open` to `/data` and `/tmp`. |
+| 2026-08-27 | orchestrator | User: 0.54 CE-108255-1 during inject. Removed `__crt_syscall`/`thr_new`/handle-sweep/`scePthreadCreate` from the hijacked thread. Overlay 0.55: checked dlsym `sceKernelOpen` heartbeat then RET. |
