@@ -581,6 +581,102 @@ elfldr_set_stdio(pid_t pid, int stdio) {
 }
 
 
+static intptr_t
+elfldr_dlsym(pid_t pid, const char *sym)
+{
+  static const unsigned int handles[] = {0x1, 0x2001, 0x2};
+  intptr_t addr;
+  unsigned int i;
+
+  if (!sym) {
+    return 0;
+  }
+  for (i = 0; i < sizeof handles / sizeof handles[0]; i++) {
+    if ((addr = kernel_dynlib_dlsym(pid, handles[i], sym))) {
+      return addr;
+    }
+  }
+  return 0;
+}
+
+
+/**
+ * Map ELF and scePthreadCreate the CRT entry. The attached game thread is
+ * left alone (no RIP hijack). CRT main() may sleep forever on that pthread.
+ **/
+int
+elfldr_inject(pid_t pid, uint8_t *elf)
+{
+  uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+                          0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+  uint8_t orgcaps[16];
+  intptr_t entry;
+  intptr_t args;
+  intptr_t ptc;
+  intptr_t buf;
+  intptr_t name;
+  long rc;
+
+  if (kernel_get_ucred_caps(pid, orgcaps)) {
+    puts("kernel_get_ucred_caps failed");
+    return -1;
+  }
+  if (kernel_set_ucred_caps(pid, privcaps)) {
+    puts("kernel_set_ucred_caps failed");
+    return -1;
+  }
+
+  if (!(entry = elfldr_load(pid, elf))) {
+    puts("elfldr_load failed");
+    goto fail;
+  }
+  if (!(args = elfldr_payload_args(pid))) {
+    puts("elfldr_payload_args failed");
+    goto fail;
+  }
+
+  ptc = elfldr_dlsym(pid, "scePthreadCreate");
+  if (!ptc) {
+    ptc = elfldr_dlsym(pid, "pthread_create");
+  }
+  if (!ptc) {
+    puts("scePthreadCreate not found");
+    goto fail;
+  }
+
+  if ((buf = pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                     MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    pt_perror(pid, "pt_mmap");
+    goto fail;
+  }
+  name = buf + 0x80;
+  pt_setlong(pid, buf, 0);
+  pt_copyin(pid, "nitepr5", name, 8);
+
+  /* scePthreadCreate(thread, attr, entry, arg, name). pthread_create ignores name. */
+  rc = pt_call(pid, ptc, buf, 0, entry, args, name);
+  if (rc != 0) {
+    puts("scePthreadCreate failed");
+    goto fail;
+  }
+
+  if (kernel_set_ucred_caps(pid, orgcaps)) {
+    puts("kernel_set_ucred_caps failed");
+    return -1;
+  }
+  if (pt_detach(pid, SIGCONT)) {
+    perror("pt_detach");
+    return -1;
+  }
+  return 0;
+
+fail:
+  (void)kernel_set_ucred_caps(pid, orgcaps);
+  (void)pt_detach(pid, SIGCONT);
+  return -1;
+}
+
+
 int
 elfldr_exec(pid_t pid, uint8_t* elf) {
   uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,

@@ -1,8 +1,8 @@
-/* Inject overlay.elf into the running game via Johns elfldr (etaHEN FPS path).
- * Game detect uses SceSystemService. eboot pid comes from :744 PROC_LIST, then
- * the socket is dropped so ps5debug is not tracing. pt_attach + elfldr_exec
- * maps the ELF, pushes original RIP, jumps CRT, detaches. Game R/W stays on
- * :744 after the inject window. Not PROC_ELF, not NineS, not elfldr 9021.
+/* Inject overlay.elf into the running game via Johns elfldr map + remote
+ * scePthreadCreate (9S/FPS path). Game detect uses SceSystemService. eboot pid
+ * comes from :744 PROC_LIST, then the socket is dropped so ps5debug is not
+ * tracing. Game thread RIP is not hijacked. Game R/W stays on :744 after the
+ * inject window. Not PROC_ELF, not NineS, not elfldr 9021.
  */
 
 #include "inject.h"
@@ -267,7 +267,7 @@ int inject_now(void)
         return INJECT_FAIL;
     }
 
-    rc = elfldr_exec((pid_t)pid, elf);
+    rc = elfldr_inject((pid_t)pid, elf);
     free(elf);
     if (rc != 0) {
         (void)pt_detach((pid_t)pid, SIGCONT);

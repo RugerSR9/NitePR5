@@ -60,7 +60,7 @@ ps5debug-NG runs inside `SceShellCore` so `PT_ATTACH` looks like an SCE debug at
 
 **Consequence:** all process R/W and scanning go through PS5Debug. Do not attach for the editor path. Pause-the-game (thread suspend) is a later feature that uses the debugger namespace on purpose.
 
-**Phase 5 B3 exception (2026-08-27):** overlay inject from the already-jailbroken etaHEN plugin **NTPR50001** uses Johns `pt_attach` + `elfldr_exec` for the inject window only (same pattern as etaHEN FPS `Inject_Toolbox`). Game R/W after that is still `:744`. Do not `PT_ATTACH` from overlay.elf, from the PC, or from a second payload.
+**Phase 5 B3 exception (2026-08-27):** overlay inject from the already-jailbroken etaHEN plugin **NTPR50001** uses Johns `pt_attach` + `elfldr_inject` (`scePthreadCreate` of the ELF entry) for the inject window only. Game R/W after that is still `:744`. Do not `PT_ATTACH` from overlay.elf, from the PC, or from a second payload.
 
 ### 3.3 Scan state is per TCP connection
 
@@ -422,3 +422,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-26 | Plugin 0.51 auto-injects `overlay.elf` into `eboot.bin` at CUSA/PPSA launch via ps5debug-NG `PROC_ELF` (`0xBDAA0007`). No NineS, no second Toolbox plugin, no `PT_ATTACH` from NTPR50001. |
 | 2026-08-27 | Overlay 0.55: hijacked PROC_ELF thread only writes a heartbeat (checked `sys_dynlib_dlsym` + `sceKernelOpen`) then RETs. 0.54 CE-108255-1 from `__crt_syscall` / `thr_new` / TLS `scePthreadCreate` / garbage dlsym. HUD still needs a later spawn from a real game pthread. |
 | 2026-08-27 | Overlay spike is **not optional**. PROC_ELF is the wrong run primitive (maps ELF, hijacks RIP, no stacked return). Plugin **0.56** uses Johns websrv `pt_attach` + `elfldr_exec` (push original RIP). Overlay **0.56** stock CRT; `main()` returns after `pthread_create(overlay_boot)`. Game R/W remains `:744`. No NineS, no elfldr 9021 for overlay. |
+| 2026-08-27 | 0.56 hardware: first boot overlay running then clean return to XMB (game ucred widen / AppContext). Later boots running then CE-108255-1 (CRT `.fini` after `main()` returned on a live eboot). **0.57**: `elfldr_inject` remote `scePthreadCreate`; overlay `main()` never returns; do not raise game authid. |

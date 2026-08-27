@@ -292,7 +292,7 @@ pt_getlong(pid_t pid, intptr_t addr) {
 }
 
 
-static long
+long
 pt_call(pid_t pid, intptr_t addr, ...) {
   struct reg jmp_reg;
   struct reg bak_reg;

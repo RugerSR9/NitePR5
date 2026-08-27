@@ -4,9 +4,9 @@
 #include <stdint.h>
 
 /* Auto-inject overlay.elf into the foreground CUSA/PPSA eboot via Johns
- * elfldr (pt_attach + elfldr_exec). :744 is used only to list eboot pid, then
- * dropped for the attach window so ps5debug is not tracing. Call inject_poll()
- * from the HTTP loop (~67 ms). Do not sleep.
+ * elfldr map + remote scePthreadCreate. :744 is used only to list eboot pid,
+ * then dropped for the attach window so ps5debug is not tracing. Call
+ * inject_poll() from the HTTP loop (~67 ms). Do not sleep.
  */
 
 #define INJECT_OK          0

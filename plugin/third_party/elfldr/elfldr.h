@@ -35,7 +35,15 @@ int elfldr_spawn(const char* cwd, int stdio, uint8_t* elf, char** argv,
 
 
 /**
- * Execute an ELF inside the process with the given pid.
+ * Map an ELF and start it on a new pthread inside pid.
+ * Does not hijack RIP. Caller must pt_attach first; this detaches.
+ **/
+int elfldr_inject(pid_t pid, uint8_t *elf);
+
+
+/**
+ * Execute an ELF on the attached thread (push original RIP).
+ * Do not use for in-game overlay — CRT fini kills the title.
  **/
 int elfldr_exec(pid_t pid, uint8_t* elf);
 

@@ -2,9 +2,9 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.56**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Title ID **NTPR50001**, version **0.57**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
-- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_exec** (`pt_attach` on eboot, map ELF, push original RIP, `pt_detach`). `:744` is dropped for that window so ps5debug is not tracing. Idle (not armed, overlay closed) does **not** hold `:744`.
+- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_inject** (`pt_attach`, map ELF, remote `scePthreadCreate`, `pt_detach`). `:744` is dropped for that window so ps5debug is not tracing. Idle (not armed, overlay closed) does **not** hold `:744`.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.
 - Classic TV toast on start, armed, `:744` missing, overlay injected / missing ELF / inject fail / overlay entry-up vs silent
 - Auto-inject via Johns elfldr (etaHEN FPS path). Attach/detach is **only** the inject window. Game R/W is still `:744`. Not NineS, not PROC_ELF, not elfldr **9021**.
@@ -58,7 +58,7 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 | POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
 | POST | `/overlay/open` | `{pid?}` else stored pid; connect `:744`; does not require armed |
 | POST | `/overlay/close` | `overlay_open=false`; clear watches; disconnect if not armed |
-| POST | `/overlay/inject` | Johns elfldr_exec of `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
+| POST | `/overlay/inject` | Johns elfldr_inject of `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
 | GET | `/read` | query `addr`, `n?=512`, `pid?` → `{addr, n, data}` hex; `n` 1..4096 |
 | POST | `/write` | `{addr, data, pid?}` two-phase PROC_WRITE; data 1..4096 B |
 | GET | `/maps` | `{maps:[{name,start,end,offset,prot}]}` metadata only |

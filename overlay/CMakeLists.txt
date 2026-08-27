@@ -87,8 +87,8 @@ target_link_libraries(overlay PRIVATE
   kernel_sys
 )
 
-# Stock Johns CRT (_start → __crt_start → main). elfldr_exec pushes the
-# original RIP so main() must return; overlay_boot runs on a new pthread.
+# Stock Johns CRT (_start → __crt_start → main) on a plugin-created pthread.
+# main() must not return (CRT fini) and must not raise the game ucred.
 set_target_properties(overlay PROPERTIES
   OUTPUT_NAME "overlay"
   PREFIX ""
