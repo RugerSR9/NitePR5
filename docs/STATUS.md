@@ -7,10 +7,10 @@ product: NitePR5
 active_phase: 5
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-27
-# Phase 5 B3: inject + combo toasts passed (0.571). HUD hooks still off.
-# Plugin wrap 0.57 (x.xx). Overlay string 0.571. Next: overlay_hooks_install.
+# Phase 5 B3: inject + combo passed (0.571). 0.572 SPRX detour → CE-108255-1.
+# 0.573: GOT swap after pad poll; no GNM text mprotect. Plugin wrap 0.57.
 # Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
-# GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
+# GitHub Actions builds nitepr5.plugin + overlay.elf. No ELF on this Windows PC.
 # PROC_WRITE: two-phase only — ps5dbg 0.1.1 write() hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env.
 # 64-bit VA: JS must not addr & ~0xf (ToInt32). Align with modulo.
@@ -23,12 +23,12 @@ last_updated: 2026-08-27
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | code_complete | **B3**. Inject + combo toasts **passed**. HUD hooks off. Next: panel. |
+| 5 Overlay spike | code_complete | **B3**. Inject + combo **passed**. **0.573** eboot GOT hooks (no SPRX mprotect). Hardware panel not run. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 5 **code_complete**, HUD not on TV yet: **0.571** inject + L1+R1+Touchpad open/close toasts passed (user 2026-08-27). Next orchestrator: turn on `overlay_hooks_install()` (see `docs/HANDOFF.md` start-here). Overlay spike is not optional.
+- Phase 5 **code_complete**: **0.572** SPRX body detours caused **CE-108255-1** on inject. **0.573** restores 0.571 inject (`main` does not hook); eboot GOT swap after pad poll. Next: CI `overlay.elf` + hardware (game stays up, then panel). Overlay spike is not optional.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
@@ -94,3 +94,5 @@ last_updated: 2026-08-27
 | 2026-08-27 | orchestrator | User: 0.56 first boot overlay running then XMB (no CE); later boots running then silent + CE-108255-1. Cause: game ucred widen + CRT `.fini` after `main()` returned. **0.57**: `elfldr_inject` remote `scePthreadCreate`; `main()` never returns; no authid raise. |
 | 2026-08-27 | orchestrator | User: 0.571 toast order running → pad poll ok → injected → CE-108255-1 → silent. `pt_call(scePthreadCreate)` followed the new thread and restored game regs onto it. Same version **0.571** now: int3 stager; overlay_gate ~2s then CRT; GNM hooks off. Do not call it 0.62. |
 | 2026-08-27 | orchestrator | User: 0.571 int3 stager **injects**; L1+R1+Touchpad **open/close toasts**. No on-screen panel — GNM hooks still off. Handoff rewritten for a fresh orchestrator (`docs/HANDOFF.md` start-here). |
+| 2026-08-27 | orchestrator | Phase 5 HUD **0.572** source: VO + GNM flip installed; pad detour off; pad poll feeds `overlay_on_input` when open. Plugin wrap stays **0.57**. Hardware panel + poke not run. |
+| 2026-08-27 | orchestrator | User: **0.572 CE-108255-1** during inject. Cause: `detour_install` `mprotect` RWX + 14-byte jmp on GNM/VO SPRX text (game caps already restored). **0.573**: no hooks in `main()`; eboot GOT pointer swap after pad poll; `detour_install` is a hard fail. |

@@ -89,7 +89,8 @@ target_link_libraries(overlay PRIVATE
 )
 
 # overlay_gate is e_entry (TSC wait, then Johns CRT). Keep __crt_start linked.
-# main() must not return and must not raise the game ucred. GNM hooks off in 0.571.
+# main() must not return and must not raise the game ucred. HUD hooks are eboot
+# GOT swaps after pad poll — never SPRX body mprotect (0.572 CE-108255-1).
 target_link_options(overlay PRIVATE -Wl,-e,overlay_gate -Wl,-u,__crt_start)
 
 set_source_files_properties(source/start.c PROPERTIES

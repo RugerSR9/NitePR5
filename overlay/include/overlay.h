@@ -11,7 +11,7 @@
 /* B3 in-game ELF. Memory R/W is HTTP to NTPR50001 :1745 only — never :744. */
 
 #define OVERLAY_NAME     "NitePR5"
-#define OVERLAY_VERSION  "0.572"
+#define OVERLAY_VERSION  "0.573"
 #define PLUGIN_HOST      "127.0.0.1"
 #define PLUGIN_PORT      1745
 
@@ -183,6 +183,7 @@ int overlay_worker_start(void);
 void *overlay_dlsym(const char *const *mods, const char *sym);
 
 int detour_install(void *target, void *hook, void **orig_out);
+int got_hook_install(void *real, void *hook, void **orig_out);
 
 void draw_capture_buffers(int handle, int start_index, void *const *addresses, int count,
                           const void *attr);

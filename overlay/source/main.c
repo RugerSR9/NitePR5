@@ -68,7 +68,8 @@ int main(void)
     overlay_notify("NitePR5 overlay running");
     net_init();
     (void)overlay_worker_start();
-    (void)overlay_hooks_install();
+    /* 0.573: do not hook GNM/VO here. 0.572 SPRX body detours during
+     * inject → CE-108255-1. Worker installs eboot GOT hooks after pad poll. */
 
     for (;;) {
         sleep(0x4000);
