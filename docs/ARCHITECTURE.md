@@ -418,3 +418,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-26 | Phase 5 backend is **B3** (in-game ELF). **B2 is dead** (Toolbox fork). Overlay is a full TV editor (Live/Watch/Freeze/Cheats); scans stay on the PC. Overlay talks to plugin `:1745` only. |
 | 2026-08-26 | Phase 5 Wave 2 source complete: B3 in-game ELF in `overlay/` (VideoOut composite HUD, DualSense, `:1745` client). Hardware exit not run. |
 | 2026-08-26 | Plugin 0.51 auto-injects `overlay.elf` into `eboot.bin` at CUSA/PPSA launch via ps5debug-NG `PROC_ELF` (`0xBDAA0007`). No NineS, no second Toolbox plugin, no `PT_ATTACH` from NTPR50001. |
+| 2026-08-26 | Overlay 0.52 custom `overlay_start` e_entry: PROC_ELF maps the ELF and hijacks a game thread but does not wait for `main()`. Johns CRT often never reaches `main()` in a live eboot; PROC_ELF also restores game ucred before the jump so in-game toasts stay silent until caps are raised. |

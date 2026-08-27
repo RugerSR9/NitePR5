@@ -70,3 +70,13 @@ void notify_overlay_fail(void)
 {
     notify_toast("NitePR5 overlay inject failed");
 }
+
+void notify_overlay_alive(void)
+{
+    notify_toast("NitePR5 overlay entry is up");
+}
+
+void notify_overlay_silent(void)
+{
+    notify_toast("NitePR5 overlay silent (never started)");
+}

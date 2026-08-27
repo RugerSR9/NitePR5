@@ -7,9 +7,9 @@ product: NitePR5
 active_phase: 5
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-26
-# Phase 5 Wave 2 source complete. B3 overlay/ ELF 0.51 pad-poll + combo toast.
-# Plugin 0.51 auto-inject. Hardware: inject toast seen; combo HUD not yet.
-# Overlay talks to plugin :1745, not a second :744. B2 is dead (Toolbox fork).
+# Phase 5 B3 overlay 0.52 custom e_entry (PROC_ELF never reached main/toasts).
+# Plugin 0.52 heartbeat /data/nitepr5/overlay.alive. Hardware: inject toast seen;
+# overlay toasts were missing on 0.51. Overlay talks to plugin :1745, not :744.
 # Plugin injects overlay.elf at CUSA/PPSA launch via PROC_ELF.
 # Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
 # GitHub Actions builds nitepr5.plugin. No ELF on this Windows PC.
@@ -25,12 +25,12 @@ last_updated: 2026-08-26
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | code_complete | **B3**. Plugin 0.51 auto-inject + `overlay/` ELF. Hardware exit not run. |
+| 5 Overlay spike | code_complete | **B3**. Plugin 0.52 auto-inject + `overlay/` ELF 0.52 custom entry. Hardware exit not run. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (0.51) + `overlay.elf` to `/data/nitepr5/overlay.elf`; Toolbox NTPR50001; ps5debug-NG on 9021; launch CUSA13762; toast **overlay injected**; L1+R1+Touchpad; poke one Live value. If the HUD is blank (VideoOut buffers registered before inject), that is a spike kill — not a toast fallback.
+- Phase 5 **code_complete**, blocked on hardware: CI `nitepr5.plugin` (**0.52**) + `overlay.elf` to `/data/nitepr5/overlay.elf`; Toolbox NTPR50001; ps5debug-NG on 9021; launch CUSA13762; toast **overlay injected**, then **overlay entry is up** (or **overlay silent**); L1+R1+Touchpad; poke one Live value. If the HUD is blank (VideoOut buffers registered before inject), that is a spike kill — not a toast fallback.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
@@ -88,3 +88,4 @@ last_updated: 2026-08-26
 | 2026-08-26 | orchestrator | Wave 2 CI: sibling `overlay` job in `.github/workflows/main.yml` (skip if no CMakeLists). Waiting on overlay ELF source. |
 | 2026-08-26 | orchestrator | Wave 2 overlay ELF merged (`overlay/`). Open uses getpid()+`/overlay/open` (not `/foreground` first). `code_complete`; hardware exit not run. |
 | 2026-08-26 | orchestrator | Overlay 0.51: pad poll fallback + combo toast. Inject toast was plugin-only; combo was detour-only and worker slept while closed. |
+| 2026-08-26 | orchestrator | User: no overlay toasts, only plugin inject toast. PROC_ELF maps ELF but Johns CRT never reached main(); PROC_ELF restores game ucred before jump. Overlay 0.52 `overlay_start` e_entry: raise caps, `/data/nitepr5/overlay.alive`, toast, then `__crt_start`. Plugin 0.52 heartbeat toast. |

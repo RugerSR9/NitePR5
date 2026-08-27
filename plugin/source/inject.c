@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define INJECT_LIST_CAP     4096
 #define INJECT_SETTLE_MS    4000u
@@ -20,6 +21,7 @@
 #define INJECT_RETRY_MS     2000u
 #define INJECT_POLL_MS      400u
 #define INJECT_MAX_ATTEMPTS 5
+#define INJECT_ALIVE_MS     2000u
 
 int sceSystemServiceGetAppIdOfRunningBigApp(void);
 int sceSystemServiceGetAppTitleId(int app_id, char *title_id);
@@ -33,6 +35,8 @@ static int g_just_started = 1;
 static int g_missing_elf_told;
 static int g_missing_dbg_told;
 static int g_fail_told;
+static uint64_t g_alive_due_ms;
+static int g_alive_told;
 
 static uint64_t now_ms(void)
 {
@@ -218,6 +222,8 @@ int inject_now(void)
     }
     st->dbg = 1;
 
+    (void)unlink(OVERLAY_ALIVE_PATH);
+
     pid = find_eboot_pid();
     if (pid == 0) {
         free(elf);
@@ -246,6 +252,8 @@ int inject_now(void)
     }
 
     g_injected_pid = pid;
+    g_alive_due_ms = now_ms() + INJECT_ALIVE_MS;
+    g_alive_told = 0;
     if (st->pid == 0) {
         st->pid = pid;
     }
@@ -266,6 +274,8 @@ static void reset_title(void)
     g_missing_elf_told = 0;
     g_missing_dbg_told = 0;
     g_fail_told = 0;
+    g_alive_due_ms = 0;
+    g_alive_told = 0;
 }
 
 void inject_poll(void)
@@ -293,12 +303,25 @@ void inject_poll(void)
         g_missing_elf_told = 0;
         g_missing_dbg_told = 0;
         g_fail_told = 0;
+        g_alive_due_ms = 0;
+        g_alive_told = 0;
         g_due_ms = t + (g_just_started ? INJECT_BOOT_MS : INJECT_SETTLE_MS);
         g_just_started = 0;
         return;
     }
 
     if (g_injected_pid != 0) {
+        struct stat st;
+
+        if (!g_alive_told && g_alive_due_ms != 0 && t >= g_alive_due_ms) {
+            g_alive_told = 1;
+            g_alive_due_ms = 0;
+            if (stat(OVERLAY_ALIVE_PATH, &st) == 0 && st.st_size > 0) {
+                notify_overlay_alive();
+            } else {
+                notify_overlay_silent();
+            }
+        }
         return;
     }
     if (g_attempts >= INJECT_MAX_ATTEMPTS) {

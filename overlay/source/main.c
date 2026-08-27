@@ -89,9 +89,9 @@ int main(void)
     st->poke_width = 4;
     st->pid = (uint32_t)getpid();
 
-    overlay_notify("NitePR5 overlay running");
-
+    /* PROC_ELF restores game ucred before the jump. Toast after raise. */
     widen_for_sockets();
+    overlay_notify("NitePR5 overlay running");
     net_init();
     (void)overlay_worker_start();
     mprotect_ready();

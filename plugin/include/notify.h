@@ -11,5 +11,7 @@ void notify_overlay_injected(void);
 void notify_overlay_missing_elf(void);
 void notify_overlay_no_dbg(void);
 void notify_overlay_fail(void);
+void notify_overlay_alive(void);
+void notify_overlay_silent(void);
 
 #endif
