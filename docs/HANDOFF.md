@@ -8,14 +8,71 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-27)
 
-Phases **0–4 are `done`** on hardware. **Phase 5 is `code_complete` (B3)** — hardware exit not run. Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions builds `nitepr5.plugin` and `overlay.elf`. **Do not kill the overlay spike.**
+Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`, **inject + combo toasts passed** (user 2026-08-27). **No on-screen HUD yet** — GNM/VideoOut hooks are compiled but **not installed**. **Do not kill the overlay spike.** Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions builds `nitepr5.plugin` and `overlay.elf`.
 
 | Fact | Value |
 |---|---|
-| Phases 0–3 | `done` (CUSA13762: hunt, poke, freeze, GoldHEN save/reload/toggle) |
-| Phase 4 | `done` — NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25 Phase 4 plugin bind) |
-| Phase 5 | **B3** `code_complete`. Overlay+plugin **0.571** int3 stager; hooks off. |
+| Console | FW **9.60**, **etaHEN only**, LAN **192.168.4.42** |
+| Debugger | ps5debug-NG **v1.3.0** via elfldr **9021** (not Toolbox PS5Debug). TCP **744** |
+| Test title | **CUSA13762** (`eboot.bin`) |
+| Phases 0–3 | `done` (hunt, poke, freeze, GoldHEN save/reload/toggle) |
+| Phase 4 | `done` — NTPR50001; plugin freeze overwrites web pokes (user 2026-08-26) |
+| Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25) |
+| Phase 5 | **B3**. Inject + L1+R1+Touchpad **open/close toasts** on hardware. HUD hooks **off**. |
+| Version | Overlay / product **0.571**. Plugin **`.plugin` wrap is `0.57`** (`x.xx` for etaHEN). User: do not call it 0.62. |
+
+### Next job (only this)
+
+Turn **`overlay_hooks_install()`** back on in `overlay/source/main.c` so the translucent panel composites onto VideoOut. Keep pad poll as fallback. Do **not** steal `scePadReadState` PLT if etaHEN FPS HookGame already did. Do **not** change game authid/caps. Do **not** return from `main()`. Do **not** `pt_call(scePthreadCreate)`. Bump overlay version (e.g. **0.572**); plugin wrap stays `x.xx` (e.g. **0.57**).
+
+**Exit:** game stays up; combo opens a **see-through panel**; poke one value via overlay → plugin `:1745` → `:744`.
+
+### Working inject path (do not regress)
+
+1. Plugin lists `eboot.bin` on **`:744`**, then **disconnects** (ps5debug must not be tracing).
+2. `pt_attach` → Johns `elfldr_load` + `elfldr_payload_args` → **int3 stager** calls `scePthreadCreate(overlay_gate)` → restore **same** game thread regs → `pt_detach(SIGCONT)`.
+3. `overlay_gate` (`overlay/source/start.c`) TSC-waits ~2 s, then Johns `__crt_start`.
+4. `main()` writes heartbeat, toasts, `overlay_worker_start()`, **never returns**. Pad poll in the worker sees the combo.
+
+Vendored: `plugin/third_party/elfldr/` (websrv `pt.c`/`elfldr.c`, GPL-3, John Törnblom). `elfldr_spawn` compiled out. `elfldr_exec` (RIP hijack) unused.
+
+### Dead paths (do not revive)
+
+| Attempt | Result |
+|---|---|
+| ps5debug-NG **`PROC_ELF`** (`0xBDAA0007`) | Maps ELF, hijacks RIP, **no stacked return**. Johns CRT never meant for a live eboot. |
+| `elfldr_exec` (push RIP, run CRT on stolen thread) | `main()` return → CRT `.fini` → **CE-108255-1**. Parking the thread → boot freeze (0.52). |
+| `pt_call(scePthreadCreate)` | Single-steps the **new** thread; restores game regs onto it. Toast order **running → pad poll ok → injected → CE**. |
+| Widen game `ucred` / authid `0x4800000000000007` | Clean return to **XMB**, no CE. |
+| `pthread_create` / `thr_new` / `__crt_syscall` on the **hijacked boot thread** | Silent or **CE-108255-1** (0.53–0.54). |
+| Overlay on elfldr **9021** | New process, no pad/framebuffer. |
+| NineS `:9033` | Forbidden. |
+| Second `:744` from overlay | Forbidden. Memory is HTTP **127.0.0.1:1745** only. |
+| Killing B3 | User 2026-08-27: **not optional**. |
+
+### Version wrap
+
+- etaHEN `.plugin` header: historically `^\d\.\d{2}$`. `plugin/CMakeLists.txt` **`PLUGIN_VERSION 0.57`**. Comment: `0.501` → wrap as `0.50`.
+- `make_plugin.py` also allows `x.xxx`. Prefer **`x.xx` on the plugin wrap** so Toolbox loads.
+- `overlay/include/overlay.h` **`OVERLAY_VERSION 0.571`**. `plugin/include/nitepr5.h` still says `0.571` (string only; wrap uses CMake).
+
+### Files that matter
+
+- Plugin inject: `plugin/source/inject.c`, `plugin/third_party/elfldr/{elfldr.c,pt.c}` (`elfldr_inject`)
+- Overlay entry: `overlay/source/start.c` (`overlay_gate`), `overlay/source/main.c` (hooks **off**)
+- HUD (compiled, not installed): `overlay/source/{hooks,draw,hud,detour,worker}.c`
+- Combo: `PAD_COMBO` = L1+R1+Touchpad click in `overlay/include/overlay.h`
+- Plugin I/O: `plugin/source/http.c` `:1745`; freeze tick stays in the plugin
+- CI: `.github/workflows/main.yml` (plugin + overlay jobs). `workflow_dispatch`. Not on `main` merge.
+
+### Locked constraints (every worker)
+
+- FW 9.60, etaHEN only, ps5debug-NG `:744`. Game R/W via **`ps5dbg`** (web) or plugin `:744` client. Overlay **never** opens `:744`.
+- `PT_ATTACH` only the inject window from NTPR50001 (FPS/elfldr). Not from overlay.elf, not for editor R/W.
+- Caps: hex peephole 512 B @ ~4 Hz, watch ≤64 @ ~10 Hz, freeze ≤32 @ 15 Hz, scan results ≤256. Never dump all RAM.
+- GoldHEN JSON only. Local / single-player. No new jailbreak work.
+- Combo: **L1+R1+Touchpad**. Do not steal Toolbox shortcut slots.
+
 
 ### Phase 4 locked contract (user 2026-08-25)
 
@@ -53,15 +110,15 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-Phase 4 is **`done`**. Phase 5 backend is **B3**, **code_complete** (not hardware-done). Plugin **0.571** auto-injects via **int3 stager** (not `pt_call(scePthreadCreate)` — that followed the overlay thread and smashed regs, CE-108255-1 after "injected"). Overlay **0.571** `overlay_gate` waits ~2 s then CRT; `main()` never returns; no game ucred widen; **GNM/pad hooks off** (pad poll only). Do not kill the overlay spike. Do not send overlay to elfldr **9021**. Do not NineS `:9033`.
+See **Next orchestrator — start here** at the top. Phase 4 is **`done`**. Next is HUD hooks only (`overlay_hooks_install`). Do not send overlay to elfldr **9021**. Do not NineS `:9033`.
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NTPR50001 / **0.571**. HTTP :1745. Inject: int3 stager after elfldr_load. Heartbeat `/data/nitepr5/overlay.alive`. ELF is built in GitHub Actions, not on this Windows PC.
+`plugin/` exists. Title NTPR50001. **Wrap version `0.57`**. HTTP :1745. Inject: int3 stager after elfldr_load. Heartbeat `/data/nitepr5/overlay.alive`. ELF is built in GitHub Actions, not on this Windows PC.
 
-`make_plugin.py` uses stock etaHEN TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it.
+`make_plugin.py` TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it. Plugin wrap prefer `x.xx`.
 
-Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`.
+Notify missing `:744` is rate-limited (`g_dbg_missing_told`). Freeze tick ~67 ms poll loop. Caps 32. GoldHEN + `executable` module base. Persist `/data/nitepr5/state.json`. Plugin also links `kernel` + `kernel_sys` (elfldr). Still **no** hijacker, **no** ScePad on the plugin.
 
 ### Phase 5 Wave 0 (explore 2026-08-26) — paste into Phase 5 workers
 
@@ -70,16 +127,12 @@ User: full on-TV editor (Live / Watch / Freeze / Cheats / related views). No tur
 | Backend | Verdict |
 |---|---|
 | **B2** ShellUI PUI | **NO-GO.** Overlay Labels + DualSense shortcuts are Toolbox-in-`SceShellUI` only. No plugin PUI API. Fork required. |
-| **B3** in-game ELF | **GO with caveats.** Inject + GNM flip tick + pad PLT exist. `fps_elf` only toasts FPS; translucent multi-view HUD is **greenfield**. |
+| **B3** in-game ELF | **GO.** Inject + combo toasts **passed** (user 2026-08-27). Translucent HUD is written (`draw.c`/`hud.c`/`hooks.c`) but **hooks not installed**. |
 | Plugin I/O | **GO.** `PROC_READ=0xBDAA0002` one-phase (`<IQI` pid,addr,len → SUCCESS → `length` bytes). Not two-phase. Cap `n` 1..4096. |
 
-**B3 spike shape (if user confirms):** `overlay/` = Johns SDK ELF (fps_elf-shaped), deploy `/data/nitepr5/overlay.elf`. Plugin auto-injects via Johns elfldr_inject at game launch — **do not** steal `scePadReadState` PLT if etaHEN FPS already did (HookGame fights). Draw+pad in the ELF. Memory path: HTTP `127.0.0.1:1745` → NTPR50001 → `:744`. In-process game `memcpy` **forbidden**. Combo: L1+R1+Touchpad open/close; Cross commit; Circle cancel. Leave ShellUI shortcuts alone.
+**B3 shape:** `overlay/` = Johns SDK ELF, `/data/nitepr5/overlay.elf`. Plugin auto-injects via int3 stager. **Do not** steal `scePadReadState` PLT if etaHEN FPS already did. Memory: HTTP `127.0.0.1:1745` → NTPR50001 → `:744`. In-process game `memcpy` **forbidden**. Combo: L1+R1+Touchpad. Leave ShellUI shortcuts alone.
 
-**Do not kill B3.** User 2026-08-27: overlay spike is not optional.
-
-**Wave 2 overlay (source 2026-08-27):** Inject: plugin **0.571** int3 stager ~12 s after launch. Overlay **0.571** `overlay_gate` then CRT; hooks off; pad poll only.
-
-**Wave 1 plugin `:1745` (implemented 2026-08-26, version 0.57):** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. `POST /disarm` keeps `:744` if overlay open. Session web API unchanged. Overlay open must happen **before** `/foreground`/`/read` (plugin `require_dbg`). Injected ELF should `POST /overlay/open` with `getpid()`. Auto-inject lists eboot on `:744` then **disconnects** before `pt_attach`. `POST /overlay/inject` for a manual retry.
+**Wave 1 plugin `:1745`:** See `plugin/README.md`. `overlay_open` RAM-only. Watches RAM-only, cleared on `/overlay/close`. Freeze persists. Overlay `POST /overlay/open` with `getpid()` before `/foreground`/`/read`. `POST /overlay/inject` for a manual retry.
 
 ### Last live incident (fixed; hardware re-verified 2026-08-25)
 
@@ -141,7 +194,7 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 5 — B3 source complete; hardware exit is plugin auto-inject + poke
+5. `docs/ORCHESTRATION.md` Phase 5 — next is HUD hooks; inject + combo already passed
 
 Forbidden: B2+B3 together, pointer/AOB/disasm, unbounded polling, `PT_ATTACH` for editor R/W (plugin B3 elfldr inject window is the exception), second `:744` from overlay, ELF cross-compile on this Windows PC (CI is allowed).
 
@@ -560,4 +613,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 5 | **B3** `code_complete`. Hardware: **0.571** injected then running (not the reverse); game stays up; pad poll. Overlay spike is not optional. |
+| 5 | **B3** inject + combo **passed**. Next: install GNM/VideoOut hooks; see-through panel; poke one value. Overlay spike is not optional. |
