@@ -56,7 +56,7 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 | POST | `/disarm` | stop freeze tick; keep files; disconnect `:744` unless `overlay_open` |
 | POST | `/cheat/toggle` | `{name, enabled}` |
 | POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
-| POST | `/overlay/open` | `{pid?, flip_wl_hook?, flip_wl_tramp?, …}` connect `:744`; plugin **0.57** NID-PLT (all dynlibs); SPRX trampoline if n=0 |
+| POST | `/overlay/open` | `{pid?, flip_wl_hook?, …}` connect `:744`; plugin wrap **0.57** NID-PLT (all dynlibs). No SPRX trampoline. |
 | POST | `/overlay/close` | `overlay_open=false`; clear watches; disconnect if not armed |
 | POST | `/overlay/inject` | Johns elfldr_inject of `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
 | GET | `/read` | query `addr`, `n?=512`, `pid?` → `{addr, n, data}` hex; `n` 1..4096 |

@@ -26,7 +26,7 @@
 #define INJECT_RETRY_MS     2000u
 #define INJECT_POLL_MS      400u
 #define INJECT_MAX_ATTEMPTS 5
-#define INJECT_ALIVE_MS     5000u
+#define INJECT_ALIVE_MS     12000u
 
 int sceSystemServiceGetAppIdOfRunningBigApp(void);
 int sceSystemServiceGetAppTitleId(int app_id, char *title_id);

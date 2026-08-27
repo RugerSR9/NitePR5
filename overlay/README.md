@@ -34,9 +34,9 @@ Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If y
 3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback path: `/data/etaHEN/plugins/overlay.elf`.
 4. Elfldr **9021**: send **ps5debug-NG** (already required for the web editor).
 5. Start **CUSA13762**. Wait ~12 s for **overlay injected**, then **overlay running** and **pad poll only (hooks off)**, then **pad poll ok**. The game must **stay up**. **0.572** SPRX jmp at inject is **CE-108255-1** — overlay must not install hooks. **0.573 launches**; pointer-match GOT is a no-op.
-6. **L1+R1+Touchpad click** after you are in-game. Combo toasts **open/close**. Plugin toasts **`got gnm=? vo=? r=? s=?`**. Panel if gnm≥1 (or `s=1`). `r=0 n=0` = resolve failed; `r=1 n=0 s=0` = NID match failed.
+6. **L1+R1+Touchpad click** after you are in-game. Combo toasts **open/close**. Plugin toasts **`got gnm=? vo=? r=? s=0`**. **`s=1` is a dead path** (CE after toggles). Panel if gnm≥1 or vo≥1 with s=0. `r=1` both 0 = NID match failed.
 
-If you get **overlay silent (never started)**, CRT/`main()` never ran — copy the matching CI `overlay.elf`. If combo toasts but a blank panel, missed `RegisterBuffers` — resolution/HDR toggle or note it. If you only see the plugin **overlay injected** toast, an old PROC_ELF ELF is still on the console.
+If you get **overlay silent (never started)** but combo still toasts, the heartbeat check raced CRT — the ELF did start. Copy a matching CI `overlay.elf` only if combo never appears.
 
 The plugin waits ~12 s after a game title appears, then Johns `elfldr_inject` (int3 stager, not `pt_call`). Overlay CRT starts ~2 s later (`overlay_gate`).
 
@@ -46,7 +46,7 @@ Manual retry (game already running): `POST http://<ps5>:1745/overlay/inject`.
 
 Close the title before Toolbox kill/run of NTPR50001, or a second inject can stack hooks. Do not run a web scan in the same second the game launches (brief `:744` burst).
 
-Do **not** use etaHEN FPS **HookGame** / eboot **pad** PLT steal. **0.575** overlay never patches GNM. Plugin **0.57** NID-PLT for GNM flip + VideoOut `RegisterBuffers` on combo (SPRX trampoline only if PLT writes 0). Pad stays poll-only.
+Do **not** use etaHEN FPS **HookGame** / eboot **pad** PLT steal. **0.575** overlay never patches GNM. Plugin wrap **0.57** NID-PLT for GNM flip + VideoOut `RegisterBuffers` on combo. **No SPRX trampoline.** Pad stays poll-only.
 
 ## Controls (DualSense via pad poll)
 

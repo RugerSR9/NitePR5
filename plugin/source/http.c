@@ -747,8 +747,9 @@ static void handle_overlay_open(int fd, const char *body)
     cJSON *o;
     uint64_t flip_wl_real = 0, flip_wl_hook = 0, flip_wl_tramp = 0, flip_real = 0, flip_hook = 0,
              flip_tramp = 0, vo_real = 0, vo_hook = 0, vo_tramp = 0;
-    int flip_n = 0, vo_n = 0, n = 0, gnm_real_ok = 0, vo_real_ok = 0, r_ok = 0, sprx = 0,
-        sprx_flip_wl = 0, sprx_flip = 0, sprx_vo = 0, got_err = 0;
+    int flip_n = 0, vo_n = 0, n = 0, gnm_real_ok = 0, vo_real_ok = 0, r_ok = 0, got_err = 0;
+    static uint32_t got_pid;
+    static int got_flip_n, got_vo_n, got_r, got_err_s;
     char msg[80];
 
     root = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -780,6 +781,9 @@ static void handle_overlay_open(int fd, const char *body)
     (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "vo_real"), &vo_real);
     (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "vo_hook"), &vo_hook);
     (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "vo_tramp"), &vo_tramp);
+    (void)flip_wl_tramp;
+    (void)flip_tramp;
+    (void)vo_tramp;
     cJSON_Delete(root);
     if (pid == 0) {
         http_err(fd, "NoTarget");
@@ -793,8 +797,32 @@ static void handle_overlay_open(int fd, const char *body)
         st->dbg = 0;
         notify_dbg_missing();
     }
-    /* NID PLT (etaHEN imagebase+r_offset), then combo-only SPRX trampoline.
+    /* NID PLT only. Plugin combo SPRX trampoline (s=1) CE-108255-1 after a
+     * few toggles and left the title unlaunchable until reboot. Do not revive.
      * Overlay never patches. Do not steal scePadReadState PLT. */
+    if (pid == got_pid && (got_flip_n > 0 || got_vo_n > 0)) {
+        flip_n = got_flip_n;
+        vo_n = got_vo_n;
+        r_ok = got_r;
+        got_err = got_err_s;
+        snprintf(msg, sizeof msg, "NitePR5 got gnm=%d vo=%d r=%d s=0", flip_n, vo_n, r_ok);
+        notify_toast(msg);
+        o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "ok", 1);
+        cJSON_AddBoolToObject(o, "overlay_open", 1);
+        cJSON_AddNumberToObject(o, "pid", (double)st->pid);
+        cJSON_AddBoolToObject(o, "dbg", st->dbg ? 1 : 0);
+        cJSON_AddNumberToObject(o, "got_flip", (double)flip_n);
+        cJSON_AddNumberToObject(o, "got_vo", (double)vo_n);
+        cJSON_AddNumberToObject(o, "got_real", (double)r_ok);
+        cJSON_AddNumberToObject(o, "got_sprx", 0);
+        cJSON_AddNumberToObject(o, "got_err", (double)got_err);
+        cJSON_AddBoolToObject(o, "sprx_flip_wl", 0);
+        cJSON_AddBoolToObject(o, "sprx_flip", 0);
+        cJSON_AddBoolToObject(o, "sprx_vo", 0);
+        http_send_obj(fd, 200, o);
+        return;
+    }
     if (flip_wl_hook) {
         uint64_t real = got_resolve_sym(pid, "libSceGnmDriverForNeoMode.sprx",
                                         "sceGnmSubmitAndFlipCommandBuffersForWorkload");
@@ -811,11 +839,6 @@ static void handle_overlay_open(int fd, const char *body)
         n = got_patch_nid(pid, "sceGnmSubmitAndFlipCommandBuffersForWorkload", flip_wl_hook);
         if (n > 0) {
             flip_n = n;
-        } else if (real && flip_wl_tramp &&
-                   got_sprx_detour(pid, real, flip_wl_hook, flip_wl_tramp) > 0) {
-            flip_n = 1;
-            sprx_flip_wl = 1;
-            sprx = 1;
         }
     }
     if (flip_n == 0 && flip_hook) {
@@ -834,11 +857,6 @@ static void handle_overlay_open(int fd, const char *body)
         n = got_patch_nid(pid, "sceGnmSubmitAndFlipCommandBuffers", flip_hook);
         if (n > 0) {
             flip_n = n;
-        } else if (real && flip_tramp &&
-                   got_sprx_detour(pid, real, flip_hook, flip_tramp) > 0) {
-            flip_n = 1;
-            sprx_flip = 1;
-            sprx = 1;
         }
     }
     if (vo_hook) {
@@ -856,21 +874,22 @@ static void handle_overlay_open(int fd, const char *body)
         n = got_patch_nid(pid, "sceVideoOutRegisterBuffers", vo_hook);
         if (n > 0) {
             vo_n = n;
-        } else if (real && vo_tramp && got_sprx_detour(pid, real, vo_hook, vo_tramp) > 0) {
-            vo_n = 1;
-            sprx_vo = 1;
-            sprx = 1;
         }
     }
     r_ok = (gnm_real_ok || vo_real_ok) ? 1 : 0;
     if (flip_n > 0 || vo_n > 0) {
         got_err = 0;
+        got_pid = pid;
+        got_flip_n = flip_n;
+        got_vo_n = vo_n;
+        got_r = r_ok;
+        got_err_s = got_err;
     } else if (!r_ok) {
         got_err = 1;
     } else {
         got_err = 2;
     }
-    snprintf(msg, sizeof msg, "NitePR5 got gnm=%d vo=%d r=%d s=%d", flip_n, vo_n, r_ok, sprx);
+    snprintf(msg, sizeof msg, "NitePR5 got gnm=%d vo=%d r=%d s=0", flip_n, vo_n, r_ok);
     notify_toast(msg);
     o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "ok", 1);
@@ -880,11 +899,11 @@ static void handle_overlay_open(int fd, const char *body)
     cJSON_AddNumberToObject(o, "got_flip", (double)flip_n);
     cJSON_AddNumberToObject(o, "got_vo", (double)vo_n);
     cJSON_AddNumberToObject(o, "got_real", (double)r_ok);
-    cJSON_AddNumberToObject(o, "got_sprx", (double)sprx);
+    cJSON_AddNumberToObject(o, "got_sprx", 0);
     cJSON_AddNumberToObject(o, "got_err", (double)got_err);
-    cJSON_AddBoolToObject(o, "sprx_flip_wl", sprx_flip_wl);
-    cJSON_AddBoolToObject(o, "sprx_flip", sprx_flip);
-    cJSON_AddBoolToObject(o, "sprx_vo", sprx_vo);
+    cJSON_AddBoolToObject(o, "sprx_flip_wl", 0);
+    cJSON_AddBoolToObject(o, "sprx_flip", 0);
+    cJSON_AddBoolToObject(o, "sprx_vo", 0);
     http_send_obj(fd, 200, o);
 }
 

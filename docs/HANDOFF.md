@@ -8,7 +8,7 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-27)
 
-Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inject + combo toasts **passed** on **0.571**. **0.572** SPRX jmp at inject → **CE-108255-1**. **0.573 launches** (user used 0.572 files for the earlier “0.573 CE”). Combo on 0.58 pointer-match GOT toasts **`got flip=0 vo=0`** — a no-op. **0.575** overlay stays 0.571 at launch. **Plugin wrap 0.57** NID-PLT on combo (`POST /overlay/open`), SPRX trampoline only if PLT writes 0. **Do not kill the overlay spike.** **No PS5 ELF cross-compile** on this Windows PC.
+Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inject + combo toasts **passed** on **0.571**. **0.572** SPRX jmp at inject → **CE-108255-1**. **0.573 launches** (user used 0.572 files for the earlier “0.573 CE”). Combo on 0.58 pointer-match GOT toasts **`got flip=0 vo=0`** — a no-op. **0.575** overlay stays 0.571 at launch. **Plugin wrap 0.57** NID-PLT on combo only — **no SPRX trampoline** (`s=1` CE-108255-1). **Do not kill the overlay spike.** **No PS5 ELF cross-compile** on this Windows PC.
 
 | Fact | Value |
 |---|---|
@@ -23,13 +23,13 @@ Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inj
 
 ### Next job (only this)
 
-**Hardware:** CI both **`nitepr5.plugin` 0.57** and **`overlay.elf` 0.575**. Cold-start CUSA13762. Game must **stay up** with toasts `overlay running` → `pad poll only (hooks off)` → `pad poll ok`. Then combo **in-game**: `combo (open)` + plugin `got gnm=? vo=? r=? s=?`. Pass is **n≥1** (or `s=1`). `r=0` with `n=0` is resolve-fail; `r=1` with `n=0 s=0` is match-fail (`got_err=2`).
+**Hardware:** **Reboot the PS5 first** if the last run toasted `s=1` (SPRX text may be wedged). Then CI **`nitepr5.plugin` wrap 0.57** (NID-PLT only, no SPRX) and **`overlay.elf` 0.575**. Cold-start CUSA13762. Game must **stay up** with toasts `overlay running` → `pad poll only (hooks off)` → `pad poll ok`. Then combo **in-game**: `got gnm=? vo=? r=? s=0`. Pass is **gnm≥1 or vo≥1** with **s=0**. `s=1` is a dead path. `r=1` with both 0 is match-fail (`got_err=2`). `overlay silent` after inject while combo still toasts is a late heartbeat, not a dead ELF.
 
 Do **not** install GNM/VO hooks from overlay.elf. Do **not** call Johns `kernel_*` from overlay. Do **not** raise authid. Do **not** return from `main()`. Do **not** `pt_call(scePthreadCreate)`. Do **not** steal pad PLT.
 
 **Exit:** game stays up; combo opens a **see-through panel**; poke one value overlay → `:1745` → `:744`.
 
-If launch CEs with 0.575 overlay, the ELF itself (not hooks) is the suspect — compare to 0.571. If combo CEs only when toast `s=1`, keep NID PLT and drop the SPRX trampoline. Overlay-only 0.575 + old plugin should still play.
+If launch CEs with 0.575 overlay after a **reboot**, the ELF itself is the suspect — compare to 0.571. If combo toasts `s=0` and `gnm=0 vo=0`, NID-PLT still found nothing (not SPRX). Overlay-only 0.575 + this plugin should still play.
 
 ### Working inject path (do not regress)
 
@@ -48,7 +48,8 @@ Vendored: `plugin/third_party/elfldr/` (websrv `pt.c`/`elfldr.c`, GPL-3, John T�
 | `elfldr_exec` (push RIP, run CRT on stolen thread) | `main()` return → CRT `.fini` → **CE-108255-1**. Parking the thread → boot freeze (0.52). |
 | `pt_call(scePthreadCreate)` | Single-steps the **new** thread; restores game regs onto it. Toast order **running → pad poll ok → injected → CE**. |
 | Widen game `ucred` / authid `0x4800000000000007` | Clean return to **XMB**, no CE. |
-| Inline SPRX `detour_install` (mprotect RWX + 14-byte jmp on GNM/VO) | **CE-108255-1** during inject (0.572). Game caps already restored. Overlay must not do this. Plugin combo trampoline is the fallback only. |
+| Inline SPRX `detour_install` (mprotect RWX + 14-byte jmp on GNM/VO) | **CE-108255-1** during inject (0.572). Game caps already restored. Overlay must not do this. |
+| Plugin combo SPRX trampoline (`s=1`) | **CE-108255-1** after a few menu toggles; title unlaunchable until **PS5 reboot**. Re-open stole the jmp. Dead. Do not revive. |
 | Pointer-match eboot GOT (`*slot == dlsym(real)`) | **No-op**: toast `flip=0 vo=0` (0.573/0.58). Lazy PLT and eboot-only miss. Dead. |
 | In-game Johns `kernel_*` GOT from overlay after pad poll | **Did not CE** (0.573). User had 0.572 files for the earlier launch CE. Overlay still must not call `kernel_*`. |
 | `pthread_create` / `thr_new` / `__crt_syscall` on the **hijacked boot thread** | Silent or **CE-108255-1** (0.53–0.54). |

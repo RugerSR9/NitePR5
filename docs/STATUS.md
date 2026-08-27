@@ -9,7 +9,7 @@ phase_state: code_complete   # not_started | in_progress | code_complete | block
 last_updated: 2026-08-27
 # Phase 5 B3: 0.571 inject+combo passed. 0.572 SPRX jmp → CE at inject.
 # 0.573 launches; pointer-match GOT is a no-op (flip=0 vo=0).
-# 0.575 overlay = 0.571 (no in-game hook). Plugin wrap 0.57 NID-PLT on combo.
+# 0.575 overlay = 0.571 (no in-game hook). Plugin wrap 0.57 NID-PLT on combo (no SPRX).
 # GitHub Actions builds nitepr5.plugin + overlay.elf. No ELF on this Windows PC.
 # PROC_WRITE: two-phase only — ps5dbg 0.1.1 write() hangs :744.
 # LangSmith: TRACE_TO_LANGSMITH in .env.
@@ -23,12 +23,12 @@ last_updated: 2026-08-27
 | 2 Scan loop | done | Turbo scan + aliasing; cheap PCD classify; exact overflow → snapshot+COUNT. CUSA13762 hunt passed (user). |
 | 3 Hex, watch, freeze, JSON | done | Poke + watch + freeze + GoldHEN JSON. Two-phase PROC_WRITE (not ps5dbg 0.1.1 `write()`). Hardware poke/freeze/cheat passed (user). |
 | 4 Plugin daemon | done | NTPR50001 loads; plugin freeze overwrites web pokes (user 2026-08-26) |
-| 5 Overlay spike | code_complete | **B3**. 0.571 inject+combo **passed**. 0.572 **CE at inject**. 0.573 **launches**; pointer-match GOT no-op. **0.575** + plugin wrap **0.57** NID-PLT on combo. |
+| 5 Overlay spike | code_complete | **B3**. 0.575 + wrap **0.57** NID-PLT only. Combo `s=1` SPRX → CE after toggles; reboot. |
 | 6 Backlog | parked | Only if the user asks |
 
 ## Blockers
 
-- Phase 5 **code_complete**: **0.572 CE-108255-1 at inject** (overlay SPRX jmp). **0.573 launches**; 0.58 pointer-match GOT is a no-op (`flip=0 vo=0`). **0.575** overlay = 0.571 (hooks off). Plugin wrap **0.57** NID-PLT on combo (SPRX trampoline if PLT writes 0). Do not bump wrap until HUD works. Install **both** CI artifacts. Overlay spike is not optional.
+- Phase 5 **code_complete**: Combo toasted **`s=1`** then CE-108255-1 after a few toggles; title unlaunchable until **reboot**. SPRX trampoline is dead. Wrap **0.57** NID-PLT only (`s=0`). Overlay **0.575**. Install new plugin; reboot first. Overlay spike is not optional.
 - Phase 4 **done** on hardware (user 2026-08-26): plugin freeze overwrites a web poke. GitHub Actions compiles the ELF; this Windows PC does not.
 - After a failed write/scan that timed out on 4 bytes: **Disconnect and Connect again** (or restart uvicorn). The rest-mode hint is a false alarm when the socket desynced. A hung PROC_WRITE desyncs `:744` the same way.
 
@@ -98,3 +98,4 @@ last_updated: 2026-08-27
 | 2026-08-27 | orchestrator | User: **0.572 CE-108255-1** during inject. Cause: `detour_install` `mprotect` RWX + 14-byte jmp on GNM/VO SPRX text (game caps already restored). **0.573**: no hooks in `main()`; eboot GOT pointer swap after pad poll; `detour_install` is a hard fail. |
 | 2026-08-27 | orchestrator | User: **0.573 still CE at launch**. Pad poll succeeds during boot so in-game `kernel_*` GOT still ran in the inject window. **0.574**: overlay never hooks (0.571 path). Plugin **0.58** GOT on `/overlay/open` (combo), privileged `kernel_proc_copyout`/`setlong`. |
 | 2026-08-27 | orchestrator | User: 0.573 **did not CE** (0.572 files were still on the console). Combo toast **`got flip=0 vo=0`**: pointer-match eboot GOT is a no-op. **0.575** overlay stays 0.571. Plugin wrap **0.57** NID-PLT (`imagebase+r_offset`, all dynlibs) on combo; SPRX trampoline fallback if n=0. Do not bump wrap until HUD works. |
+| 2026-08-27 | orchestrator | User: inject OK, then overlay silent (heartbeat); combo still toasts. Toast **`s=1`** (SPRX trampoline). CE-108255-1 after a few menu toggles; title unlaunchable until reboot. Cause: re-open stole the jmp at the already-hooked export. **SPRX fallback dead.** Wrap 0.57 NID-PLT only (`s=0`). Reboot before next hardware. |

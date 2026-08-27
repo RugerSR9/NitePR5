@@ -1,12 +1,9 @@
 #include "got_patch.h"
 
-#include "hde64.h"
-
 #include <ps5/kernel.h>
 #include <ps5/nid.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 #define PT_LOAD        1u
@@ -27,10 +24,6 @@
 #define PH_MAX         64
 #define HANDLE_MAX     1024u
 #define HANDLE_MISS    48
-#define JMP_LEN        14
-#define TRAMP_CAP      64
-#define TRAMP_READY    60
-#define CODE_PROBE     32
 
 typedef struct {
     unsigned char e_ident[16];
@@ -372,67 +365,13 @@ int got_patch_nid(uint32_t pid, const char *sym, uint64_t hook)
     return n;
 }
 
-static void abs_jmp(uint8_t *dst, uint64_t target)
-{
-    dst[0] = 0xff;
-    dst[1] = 0x25;
-    dst[2] = 0;
-    dst[3] = 0;
-    dst[4] = 0;
-    dst[5] = 0;
-    memcpy(dst + 6, &target, 8);
-}
-
+/* Plugin combo SPRX trampoline CE-108255-1 (s=1 hardware 2026-08-27).
+ * Re-entry stole the jmp and jumped into the middle of GNM. Dead. */
 int got_sprx_detour(uint32_t pid, uint64_t real, uint64_t hook, uint64_t tramp)
 {
-    pid_t p = (pid_t)pid;
-    uint8_t code[CODE_PROBE];
-    uint8_t tramp_buf[TRAMP_CAP];
-    unsigned stolen = 0;
-    uint32_t ready = 1;
-    intptr_t tramp_page;
-    intptr_t real_page;
-    hde64s hs;
-
-    if (pid == 0 || real == 0 || hook == 0 || tramp == 0 || real == hook) {
-        return -1;
-    }
-    if (rd(p, real, code, sizeof code) != 0) {
-        return -1;
-    }
-    memset(tramp_buf, 0, sizeof tramp_buf);
-    while (stolen < JMP_LEN) {
-        unsigned n;
-
-        memset(&hs, 0, sizeof hs);
-        n = hde64_disasm(code + stolen, &hs);
-        if (n == 0 || n > 15 || (hs.flags & F_ERROR) || (hs.flags & F_RELATIVE)) {
-            return -1;
-        }
-        stolen += n;
-        if (stolen + JMP_LEN > TRAMP_READY) {
-            return -1;
-        }
-    }
-    memcpy(tramp_buf, code, stolen);
-    abs_jmp(tramp_buf + stolen, real + stolen);
-    tramp_page = (intptr_t)(tramp & ~0xfffull);
-    real_page = (intptr_t)(real & ~0xfffull);
-    (void)kernel_mprotect(p, tramp_page, 0x2000, PROT_READ | PROT_WRITE | PROT_EXEC);
-    if (kernel_proc_copyin(p, tramp_buf, (intptr_t)tramp, stolen + JMP_LEN) < 0) {
-        return -1;
-    }
-    if (kernel_proc_copyin(p, &ready, (intptr_t)(tramp + TRAMP_READY), sizeof ready) < 0) {
-        return -1;
-    }
-    (void)kernel_mprotect(p, real_page, 0x2000, PROT_READ | PROT_WRITE | PROT_EXEC);
-    {
-        uint8_t jmp[JMP_LEN];
-
-        abs_jmp(jmp, hook);
-        if (kernel_proc_copyin(p, jmp, (intptr_t)real, JMP_LEN) < 0) {
-            return -1;
-        }
-    }
-    return 1;
+    (void)pid;
+    (void)real;
+    (void)hook;
+    (void)tramp;
+    return -1;
 }
