@@ -180,32 +180,54 @@ void overlay_pad_poll(void)
         ok_told = 1;
         overlay_notify("NitePR5 pad poll ok (click touchpad)");
     }
-    combo_edge(*(uint32_t *)data);
+    {
+        uint32_t buttons = *(uint32_t *)data;
+        uint32_t prev;
+        uint32_t pressed;
+        int open;
+        int combo_now;
+        overlay_state_t *st = overlay_state();
+
+        /* combo_edge writes g_prev_raw; capture prev first so HUD nav
+         * still sees a rising edge (poll cannot swallow PAD_NAV). */
+        pthread_mutex_lock(&g_padmu);
+        prev = g_prev_raw;
+        pthread_mutex_unlock(&g_padmu);
+        combo_edge(buttons);
+
+        overlay_lock();
+        open = st->open;
+        overlay_unlock();
+        combo_now = ((buttons & PAD_COMBO) == PAD_COMBO);
+        if (open && !combo_now) {
+            pressed = buttons & ~prev;
+            if (pressed & PAD_NAV) {
+                overlay_on_input(pressed);
+            }
+        }
+    }
 }
 
 int overlay_hooks_install(void)
 {
     static const char *gnm_mods[] = {"libSceGnmDriverForNeoMode.sprx", "libSceGnmDriver.sprx", NULL};
-    static const char *pad_mods[] = {"libScePad.sprx", NULL};
     static const char *vo_mods[] = {"libSceVideoOut.sprx", "libSceVideoOutForNeoMode.sprx", NULL};
     void *flip_wl;
     void *flip;
-    void *pad;
     void *vo;
-    int pad_ok = 0;
+    int pad_ok = 0; /* 0.572: pad detour off; DualSense is pad poll */
     int flip_ok = 0;
     int vo_ok = 0;
     char msg[80];
+
+    /* Keep pad_hook compiled; do not steal scePadReadState PLT. */
+    (void)pad_hook;
 
     flip_wl = overlay_dlsym(gnm_mods, "sceGnmSubmitAndFlipCommandBuffersForWorkload");
     if (flip_wl == NULL && sceGnmSubmitAndFlipCommandBuffersForWorkload) {
         flip_wl = (void *)sceGnmSubmitAndFlipCommandBuffersForWorkload;
     }
     flip = overlay_dlsym(gnm_mods, "sceGnmSubmitAndFlipCommandBuffers");
-    pad = overlay_dlsym(pad_mods, "scePadReadState");
-    if (pad == NULL && scePadReadState) {
-        pad = (void *)scePadReadState;
-    }
     vo = overlay_dlsym(vo_mods, "sceVideoOutRegisterBuffers");
 
     if (vo && detour_install(vo, (void *)vo_reg_hook, (void **)&g_vo_orig) == 0) {
@@ -216,10 +238,7 @@ int overlay_hooks_install(void)
     } else if (flip && detour_install(flip, (void *)flip_hook, (void **)&g_flip_orig) == 0) {
         flip_ok = 1;
     }
-    if (pad && detour_install(pad, (void *)pad_hook, (void **)&g_pad_orig) == 0) {
-        pad_ok = 1;
-    }
     snprintf(msg, sizeof msg, "NitePR5 hooks pad=%d flip=%d vo=%d", pad_ok, flip_ok, vo_ok);
     overlay_notify(msg);
-    return (flip_ok && pad_ok) ? 0 : -1;
+    return flip_ok ? 0 : -1;
 }

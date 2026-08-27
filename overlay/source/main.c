@@ -68,11 +68,7 @@ int main(void)
     overlay_notify("NitePR5 overlay running");
     net_init();
     (void)overlay_worker_start();
-
-    /* 0.571: no GNM/pad detours. Pad poll already works; hooks are the
-     * next crash suspect after the pt_call smash is gone.
-     */
-    overlay_notify("NitePR5 pad poll only (hooks off)");
+    (void)overlay_hooks_install();
 
     for (;;) {
         sleep(0x4000);
