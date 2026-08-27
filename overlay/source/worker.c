@@ -282,9 +282,9 @@ static void do_open(void)
 {
     overlay_state_t *st = overlay_state();
     uint32_t pid;
-    char body[640];
+    char body[896];
     cJSON *js = NULL;
-    uint64_t fw_r = 0, fw_h = 0, f_r = 0, f_h = 0, v_r = 0, v_h = 0;
+    uint64_t fw_r = 0, fw_h = 0, fw_t = 0, f_r = 0, f_h = 0, f_t = 0, v_r = 0, v_h = 0, v_t = 0;
 
     /* GET /foreground needs overlay_open or armed (plugin require_dbg).
      * This ELF is injected into eboot — getpid() is the target. */
@@ -296,11 +296,13 @@ static void do_open(void)
     }
     (void)overlay_hooks_resolve();
     overlay_hooks_export(&fw_r, &fw_h, &f_r, &f_h, &v_r, &v_h);
+    overlay_hooks_tramps(&fw_t, &f_t, &v_t);
     snprintf(body, sizeof body,
              "{\"pid\":%u,\"flip_wl_real\":%" PRIu64 ",\"flip_wl_hook\":%" PRIu64
-             ",\"flip_real\":%" PRIu64 ",\"flip_hook\":%" PRIu64
-             ",\"vo_real\":%" PRIu64 ",\"vo_hook\":%" PRIu64 "}",
-             pid, fw_r, fw_h, f_r, f_h, v_r, v_h);
+             ",\"flip_wl_tramp\":%" PRIu64 ",\"flip_real\":%" PRIu64 ",\"flip_hook\":%" PRIu64
+             ",\"flip_tramp\":%" PRIu64 ",\"vo_real\":%" PRIu64 ",\"vo_hook\":%" PRIu64
+             ",\"vo_tramp\":%" PRIu64 "}",
+             pid, fw_r, fw_h, fw_t, f_r, f_h, f_t, v_r, v_h, v_t);
     if (plugin_json("POST", "/overlay/open", body, &js) == 0) {
         overlay_lock();
         st->pid = pid;

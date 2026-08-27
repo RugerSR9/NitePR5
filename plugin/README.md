@@ -2,7 +2,7 @@
 
 etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.58**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Title ID **NTPR50001**, version **0.57**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
 - Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
 - Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is Johns **elfldr_inject** (map ELF, int3 stager `scePthreadCreate`, `pt_detach`). Do not `pt_call` pthread_create.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.
@@ -56,7 +56,7 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 | POST | `/disarm` | stop freeze tick; keep files; disconnect `:744` unless `overlay_open` |
 | POST | `/cheat/toggle` | `{name, enabled}` |
 | POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
-| POST | `/overlay/open` | `{pid?, flip_wl_hook?, …}` connect `:744`; plugin **0.58** patches eboot GOT if hook addrs present |
+| POST | `/overlay/open` | `{pid?, flip_wl_hook?, flip_wl_tramp?, …}` connect `:744`; plugin **0.57** NID-PLT (all dynlibs); SPRX trampoline if n=0 |
 | POST | `/overlay/close` | `overlay_open=false`; clear watches; disconnect if not armed |
 | POST | `/overlay/inject` | Johns elfldr_inject of `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
 | GET | `/read` | query `addr`, `n?=512`, `pid?` → `{addr, n, data}` hex; `n` 1..4096 |

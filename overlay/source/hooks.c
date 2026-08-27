@@ -19,6 +19,21 @@ static vo_reg_fn g_vo_orig;
 static uint32_t g_prev_raw;
 static pthread_mutex_t g_padmu = PTHREAD_MUTEX_INITIALIZER;
 
+/* Plugin writes stolen bytes + jmp-back, then uint32 1 at +60. Overlay never
+ * mprotects SPRX. */
+#define TRAMP_READY 60
+static uint8_t g_flip_wl_tramp[64] __attribute__((aligned(64)));
+static uint8_t g_flip_tramp[64] __attribute__((aligned(64)));
+static uint8_t g_vo_tramp[64] __attribute__((aligned(64)));
+
+static int tramp_ready(const uint8_t *t)
+{
+    uint32_t v;
+
+    memcpy(&v, t + TRAMP_READY, sizeof v);
+    return v == 1u;
+}
+
 extern int32_t scePadReadState(int32_t, void *) __attribute__((weak));
 extern int32_t scePadInit(void) __attribute__((weak));
 extern int32_t scePadGetHandle(int32_t, int32_t, int32_t) __attribute__((weak));
@@ -54,8 +69,11 @@ static int32_t flip_wl_hook(uint32_t workload, uint32_t count, uint32_t **dcb, u
                             uint32_t mode, uint32_t arg)
 {
     int32_t rc;
-    if (g_flip_wl_orig) {
-        rc = g_flip_wl_orig(workload, count, dcb, dcb_sz, ccb, ccb_sz, vo, buf, mode, arg);
+    gnm_flip_wl_fn fn;
+
+    fn = tramp_ready(g_flip_wl_tramp) ? (gnm_flip_wl_fn)(void *)g_flip_wl_tramp : g_flip_wl_orig;
+    if (fn) {
+        rc = fn(workload, count, dcb, dcb_sz, ccb, ccb_sz, vo, buf, mode, arg);
     } else {
         rc = 0;
     }
@@ -67,8 +85,11 @@ static int32_t flip_hook(uint32_t count, void **dcb, uint32_t *dcb_sz, void **cc
                          uint32_t vo, uint32_t buf, uint32_t mode, uint64_t arg)
 {
     int32_t rc;
-    if (g_flip_orig) {
-        rc = g_flip_orig(count, dcb, dcb_sz, ccb, ccb_sz, vo, buf, mode, arg);
+    gnm_flip_fn fn;
+
+    fn = tramp_ready(g_flip_tramp) ? (gnm_flip_fn)(void *)g_flip_tramp : g_flip_orig;
+    if (fn) {
+        rc = fn(count, dcb, dcb_sz, ccb, ccb_sz, vo, buf, mode, arg);
     } else {
         rc = 0;
     }
@@ -80,8 +101,11 @@ static int32_t vo_reg_hook(int32_t handle, int32_t start, void *const *addrs, in
                            const void *attr)
 {
     int32_t rc = 0;
-    if (g_vo_orig) {
-        rc = g_vo_orig(handle, start, addrs, n, attr);
+    vo_reg_fn fn;
+
+    fn = tramp_ready(g_vo_tramp) ? (vo_reg_fn)(void *)g_vo_tramp : g_vo_orig;
+    if (fn) {
+        rc = fn(handle, start, addrs, n, attr);
     }
     draw_capture_buffers((int)handle, (int)start, addrs, (int)n, attr);
     return rc;
@@ -253,5 +277,18 @@ void overlay_hooks_export(uint64_t *flip_wl_real, uint64_t *flip_wl_hk, uint64_t
     }
     if (vo_hk) {
         *vo_hk = (uint64_t)(uintptr_t)(void *)vo_reg_hook;
+    }
+}
+
+void overlay_hooks_tramps(uint64_t *flip_wl, uint64_t *flip, uint64_t *vo)
+{
+    if (flip_wl) {
+        *flip_wl = (uint64_t)(uintptr_t)g_flip_wl_tramp;
+    }
+    if (flip) {
+        *flip = (uint64_t)(uintptr_t)g_flip_tramp;
+    }
+    if (vo) {
+        *vo = (uint64_t)(uintptr_t)g_vo_tramp;
     }
 }

@@ -69,9 +69,8 @@ int main(void)
     net_init();
     (void)overlay_worker_start();
 
-    /* 0.574: same as 0.571. Overlay never installs GNM/VO hooks (0.572 SPRX
-     * jmp and 0.573 in-game kernel GOT both CE-108255-1 at launch). Pad poll
-     * only. Plugin patches eboot GOT on combo /overlay/open. */
+    /* 0.575: same as 0.571 at launch. Overlay never installs GNM/VO hooks
+     * (0.572 SPRX jmp at inject CE-108255-1). Plugin NID-PLT on combo. */
     overlay_notify("NitePR5 pad poll only (hooks off)");
 
     for (;;) {

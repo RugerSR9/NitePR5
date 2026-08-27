@@ -2,10 +2,8 @@
 
 #include <stdint.h>
 
-/* 0.572/0.573 CE-108255-1: in-game SPRX jmp and in-game kernel GOT patch
- * both run during launch (pad poll succeeds while the title is still
- * booting). Overlay must not mprotect GNM, parse eboot, or call Johns
- * kernel_* . Plugin (jailbroken) patches GOT on /overlay/open. */
+/* Overlay must not mprotect GNM or call Johns kernel_* (0.572 SPRX jmp at
+ * inject CE-108255-1). Plugin (jailbroken) patches GOT/SPRX on /overlay/open. */
 int detour_install(void *target, void *hook, void **orig_out)
 {
     (void)target;
