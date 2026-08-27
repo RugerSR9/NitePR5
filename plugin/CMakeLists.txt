@@ -43,7 +43,7 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "[Cc]lang")
 endif()
 
 set(PLUGIN_TITLE_ID "NTPR50001")
-set(PLUGIN_VERSION "0.52")
+set(PLUGIN_VERSION "0.53")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -97,7 +97,7 @@ set_target_properties(nitepr5 PROPERTIES
 add_custom_command(TARGET nitepr5 POST_BUILD
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_plugin.py"
           "$<TARGET_FILE:nitepr5>" "${PLUGIN_TITLE_ID}" "${PLUGIN_VERSION}"
-  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.52)"
+  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.53)"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   VERBATIM
 )

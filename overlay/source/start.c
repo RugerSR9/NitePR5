@@ -1,8 +1,7 @@
-/* PROC_ELF e_entry. Johns CRT (__crt_start) re-inits rtld inside a live eboot
- * and often never reaches main(). PROC_ELF also restores the game's ucred
- * before the jump, so toasts from a sandboxed eboot are silent until we
- * raise caps via payload_args. Do not import libc/SCE here — PLT is unbound
- * until CRT rtld runs.
+/* PROC_ELF e_entry. The hijacked game thread must return immediately.
+ * 0.52 ran kernel_init/CRT/for(;;) on that thread — boot froze, alive
+ * file never appeared. Spawn a new thread for CRT; do not import libc
+ * (PLT is unbound until rtld).
  */
 
 #include <stddef.h>
@@ -13,6 +12,9 @@ typedef int (*open_fn)(const char *path, int flags, int mode);
 typedef long (*write_fn)(int fd, const void *buf, unsigned long n);
 typedef int (*close_fn)(int fd);
 typedef int (*getpid_fn)(void);
+typedef int (*pthread_create_fn)(void *thread, void *attr, void *(*entry)(void *), void *arg);
+typedef int (*sce_pthread_create_fn)(void *thread, void *attr, void *(*entry)(void *), void *arg,
+                                     const char *name);
 
 typedef struct overlay_args {
     dlsym_fn dynlib_dlsym;
@@ -27,9 +29,6 @@ typedef struct notify_request {
     char useless1[45];
     char message[3075];
 } notify_request_t;
-
-extern unsigned char __bss_start[] __attribute__((weak));
-extern unsigned char __bss_end[] __attribute__((weak));
 
 int __crt_syscall_init(void *args) __attribute__((weak));
 int __kernel_init(void *args) __attribute__((weak));
@@ -156,37 +155,52 @@ static void raise_caps(overlay_args_t *args)
     }
 }
 
-static void clear_bss(void)
+static void *overlay_thread(void *arg)
 {
-    unsigned char *b;
+    overlay_args_t *args = (overlay_args_t *)arg;
 
-    if (__bss_start == NULL || __bss_end == NULL) {
-        return;
+    write_alive(args);
+    if (__crt_syscall_init) {
+        (void)__crt_syscall_init(args);
     }
-    for (b = __bss_start; b < __bss_end; b++) {
-        *b = 0;
+    if (__kernel_init && __kernel_init(args) == 0) {
+        raise_caps(args);
+        write_alive(args);
     }
+    raw_notify(args, "NitePR5 overlay entry");
+    (void)__crt_start(args);
+    raw_notify(args, "NitePR5 CRT returned");
+    for (;;) {
+    }
+    return NULL;
 }
 
-__attribute__((used, visibility("default")))
+static int spawn_overlay_thread(overlay_args_t *args)
+{
+    pthread_create_fn pc;
+    sce_pthread_create_fn sce;
+    void *th = 0;
+
+    pc = (pthread_create_fn)resolve(args, 0x2, "pthread_create");
+    if (pc != NULL && pc(&th, NULL, overlay_thread, args) == 0) {
+        return 0;
+    }
+    sce = (sce_pthread_create_fn)resolve(args, 0x1, "scePthreadCreate");
+    if (sce == NULL) {
+        sce = (sce_pthread_create_fn)resolve(args, 0x2001, "scePthreadCreate");
+    }
+    if (sce != NULL && sce(&th, NULL, overlay_thread, args, "NitePR5") == 0) {
+        return 0;
+    }
+    return -1;
+}
+
+__attribute__((used, visibility("default"), no_stack_protector))
 int overlay_start(overlay_args_t *args)
 {
-    clear_bss();
-
+    /* Jump, not call: RET resumes the interrupted game frame. Do not hang. */
     if (args != NULL) {
-        if (__crt_syscall_init) {
-            (void)__crt_syscall_init(args);
-        }
-        if (__kernel_init && __kernel_init(args) == 0) {
-            raise_caps(args);
-        }
-        write_alive(args);
-        raw_notify(args, "NitePR5 overlay entry");
-        (void)__crt_start(args);
-        raw_notify(args, "NitePR5 CRT returned");
-    }
-
-    for (;;) {
+        (void)spawn_overlay_thread(args);
     }
     return 0;
 }

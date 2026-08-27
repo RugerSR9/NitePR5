@@ -90,8 +90,12 @@ target_link_libraries(overlay PRIVATE
 
 # PROC_ELF jumps to e_entry with RDI = payload_args. Default Johns CRT
 # (__crt_start) often never reaches main() inside a live eboot. overlay_start
-# raises ucred, toasts, then calls CRT. Last -e wins over the SDK default.
+# spawns a thread then RETs so the stolen boot thread is not parked.
+# Last -e wins over the SDK default.
 target_link_options(overlay PRIVATE -Wl,-e,overlay_start -Wl,-u,__crt_start)
+
+set_source_files_properties(source/start.c PROPERTIES
+  COMPILE_FLAGS "-fno-stack-protector -fno-builtin")
 
 set_target_properties(overlay PROPERTIES
   OUTPUT_NAME "overlay"

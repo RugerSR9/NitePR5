@@ -16,12 +16,12 @@
 #include <unistd.h>
 
 #define INJECT_LIST_CAP     4096
-#define INJECT_SETTLE_MS    4000u
-#define INJECT_BOOT_MS      1000u
+#define INJECT_SETTLE_MS    12000u
+#define INJECT_BOOT_MS      8000u
 #define INJECT_RETRY_MS     2000u
 #define INJECT_POLL_MS      400u
 #define INJECT_MAX_ATTEMPTS 5
-#define INJECT_ALIVE_MS     2000u
+#define INJECT_ALIVE_MS     5000u
 
 int sceSystemServiceGetAppIdOfRunningBigApp(void);
 int sceSystemServiceGetAppTitleId(int app_id, char *title_id);
