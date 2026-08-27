@@ -7,8 +7,8 @@ product: NitePR5
 active_phase: 5
 phase_state: code_complete   # not_started | in_progress | code_complete | blocked_on_hardware | done
 last_updated: 2026-08-26
-# Phase 5 Wave 2 source complete. B3 overlay/ ELF + plugin 0.51 auto-inject.
-# Hardware exit not run. Overlay UI is full editor (Live / Watch / Freeze / Cheats).
+# Phase 5 Wave 2 source complete. B3 overlay/ ELF 0.51 pad-poll + combo toast.
+# Plugin 0.51 auto-inject. Hardware: inject toast seen; combo HUD not yet.
 # Overlay talks to plugin :1745, not a second :744. B2 is dead (Toolbox fork).
 # Plugin injects overlay.elf at CUSA/PPSA launch via PROC_ELF.
 # Phase 4 still done: NTPR50001; plugin freeze owns :744 when armed.
@@ -87,4 +87,4 @@ last_updated: 2026-08-26
 | 2026-08-26 | orchestrator | Wave 1 merged: plugin 0.50 PROC_READ + :1745 editor routes. Spawn Wave 2 `overlay/` ELF + CI. |
 | 2026-08-26 | orchestrator | Wave 2 CI: sibling `overlay` job in `.github/workflows/main.yml` (skip if no CMakeLists). Waiting on overlay ELF source. |
 | 2026-08-26 | orchestrator | Wave 2 overlay ELF merged (`overlay/`). Open uses getpid()+`/overlay/open` (not `/foreground` first). `code_complete`; hardware exit not run. |
-| 2026-08-26 | orchestrator | Plugin 0.51 auto-inject: detect CUSA/PPSA via SystemService, `PROC_ELF` `/data/nitepr5/overlay.elf` into `eboot.bin`. No NineS / Injector plugin. Hardware inject not run. |
+| 2026-08-26 | orchestrator | Overlay 0.51: pad poll fallback + combo toast. Inject toast was plugin-only; combo was detour-only and worker slept while closed. |

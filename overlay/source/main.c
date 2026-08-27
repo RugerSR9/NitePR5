@@ -67,7 +67,7 @@ static void mprotect_ready(void)
     int i;
 
     memset(buf, 0, sizeof buf);
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < 2; i++) {
         if (sceKernelMprotect &&
             sceKernelMprotect(buf, sizeof buf, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
             return;
@@ -89,15 +89,18 @@ int main(void)
     st->poke_width = 4;
     st->pid = (uint32_t)getpid();
 
+    overlay_notify("NitePR5 overlay running");
+
     widen_for_sockets();
     net_init();
+    (void)overlay_worker_start();
     mprotect_ready();
 
-    (void)overlay_worker_start();
     if (overlay_hooks_install() != 0) {
         overlay_lock();
         overlay_set_error("hook failed (flip/pad)");
         overlay_unlock();
+        overlay_notify("NitePR5 hook failed — pad poll still on");
     }
 
     for (;;) {

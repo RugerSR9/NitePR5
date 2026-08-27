@@ -1041,12 +1041,9 @@ static void *worker_main(void *arg)
         open = st->open;
         view = st->view;
         overlay_unlock();
+        overlay_pad_poll();
         if (!open) {
-            pthread_mutex_lock(&g_qmu);
-            if (g_q_n == 0) {
-                pthread_cond_wait(&g_cv, &g_qmu);
-            }
-            pthread_mutex_unlock(&g_qmu);
+            usleep(50 * 1000);
             continue;
         }
         now = overlay_now_ms();

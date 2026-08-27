@@ -55,6 +55,7 @@ add_executable(overlay
   source/hud.c
   source/http_client.c
   source/worker.c
+  source/notify.c
   third_party/cjson/cJSON.c
 )
 

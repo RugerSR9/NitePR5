@@ -1,6 +1,8 @@
 #include "overlay.h"
 
+#include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 typedef int32_t (*gnm_flip_wl_fn)(uint32_t, uint32_t, uint32_t **, uint32_t *, uint32_t **,
@@ -15,12 +17,41 @@ static gnm_flip_fn g_flip_orig;
 static pad_read_fn g_pad_orig;
 static vo_reg_fn g_vo_orig;
 static uint32_t g_prev_raw;
+static pthread_mutex_t g_padmu = PTHREAD_MUTEX_INITIALIZER;
 
 extern int32_t sceGnmSubmitAndFlipCommandBuffersForWorkload(uint32_t, uint32_t, uint32_t **,
                                                             uint32_t *, uint32_t **, uint32_t *,
                                                             uint32_t, uint32_t, uint32_t, uint32_t)
     __attribute__((weak));
 extern int32_t scePadReadState(int32_t, void *) __attribute__((weak));
+extern int32_t scePadInit(void) __attribute__((weak));
+extern int32_t scePadGetHandle(int32_t, int32_t, int32_t) __attribute__((weak));
+extern int32_t scePadOpen(int32_t, int32_t, int32_t) __attribute__((weak));
+extern int32_t sceUserServiceGetForegroundUser(int32_t *) __attribute__((weak));
+
+static void combo_edge(uint32_t buttons)
+{
+    int combo_now = ((buttons & PAD_COMBO) == PAD_COMBO);
+    int combo_prev;
+    int open;
+    overlay_state_t *st = overlay_state();
+
+    pthread_mutex_lock(&g_padmu);
+    combo_prev = ((g_prev_raw & PAD_COMBO) == PAD_COMBO);
+    if (combo_now && !combo_prev) {
+        overlay_lock();
+        open = st->open;
+        overlay_unlock();
+        overlay_notify(open ? "NitePR5 combo (close)" : "NitePR5 combo (open)");
+        if (open) {
+            overlay_request_close();
+        } else {
+            overlay_request_open();
+        }
+    }
+    g_prev_raw = buttons;
+    pthread_mutex_unlock(&g_padmu);
+}
 
 static int32_t flip_wl_hook(uint32_t workload, uint32_t count, uint32_t **dcb, uint32_t *dcb_sz,
                             uint32_t **ccb, uint32_t *ccb_sz, uint32_t vo, uint32_t buf,
@@ -78,41 +109,78 @@ static int32_t pad_hook(int32_t handle, void *data)
     }
     btn = (uint32_t *)data;
     buttons = btn[0];
-
+    pthread_mutex_lock(&g_padmu);
     {
-        int combo_now = ((buttons & PAD_COMBO) == PAD_COMBO);
-        int combo_prev = ((g_prev_raw & PAD_COMBO) == PAD_COMBO);
-        uint32_t out = buttons;
+        uint32_t prev = g_prev_raw;
+        pthread_mutex_unlock(&g_padmu);
+        combo_edge(buttons);
+        {
+            uint32_t out = buttons;
+            int combo_now = ((buttons & PAD_COMBO) == PAD_COMBO);
 
-        overlay_lock();
-        open = st->open;
-        overlay_unlock();
-        if (combo_now && !combo_prev) {
+            overlay_lock();
+            open = st->open;
+            overlay_unlock();
+            if (combo_now) {
+                out &= (uint32_t)~PAD_COMBO;
+            }
             if (open) {
-                overlay_request_close();
-            } else {
-                overlay_request_open();
-            }
-        }
-        overlay_lock();
-        open = st->open;
-        overlay_unlock();
-        if (combo_now) {
-            out &= (uint32_t)~PAD_COMBO;
-        }
-        if (open) {
-            if (!combo_now) {
-                uint32_t pressed = buttons & ~g_prev_raw;
-                if (pressed & PAD_NAV) {
-                    overlay_on_input(pressed);
+                if (!combo_now) {
+                    uint32_t pressed = buttons & ~prev;
+                    if (pressed & PAD_NAV) {
+                        overlay_on_input(pressed);
+                    }
                 }
+                out &= (uint32_t)~PAD_NAV;
             }
-            out &= (uint32_t)~PAD_NAV;
+            btn[0] = out;
         }
-        btn[0] = out;
-        g_prev_raw = buttons;
     }
     return rc;
+}
+
+void overlay_pad_poll(void)
+{
+    static int inited;
+    static int handle = -1;
+    static int fail_told;
+    static int ok_told;
+    uint8_t data[256];
+    int32_t rc;
+
+    if (!inited) {
+        int32_t uid = 0;
+
+        inited = 1;
+        if (scePadInit) {
+            (void)scePadInit();
+        }
+        if (sceUserServiceGetForegroundUser && sceUserServiceGetForegroundUser(&uid) == 0) {
+            if (scePadGetHandle) {
+                handle = scePadGetHandle(uid, 0, 0);
+            }
+            if (handle < 0 && scePadOpen) {
+                handle = scePadOpen(uid, 0, 0);
+            }
+        }
+        if (handle < 0 && !fail_told) {
+            fail_told = 1;
+            overlay_notify("NitePR5 pad handle failed");
+        }
+    }
+    if (handle < 0 || scePadReadState == NULL) {
+        return;
+    }
+    memset(data, 0, sizeof data);
+    rc = scePadReadState(handle, data);
+    if (rc != 0) {
+        return;
+    }
+    if (!ok_told) {
+        ok_told = 1;
+        overlay_notify("NitePR5 pad poll ok (click touchpad)");
+    }
+    combo_edge(*(uint32_t *)data);
 }
 
 int overlay_hooks_install(void)
@@ -124,7 +192,10 @@ int overlay_hooks_install(void)
     void *flip;
     void *pad;
     void *vo;
-    int ok = 0;
+    int pad_ok = 0;
+    int flip_ok = 0;
+    int vo_ok = 0;
+    char msg[80];
 
     flip_wl = overlay_dlsym(gnm_mods, "sceGnmSubmitAndFlipCommandBuffersForWorkload");
     if (flip_wl == NULL && sceGnmSubmitAndFlipCommandBuffersForWorkload) {
@@ -138,15 +209,17 @@ int overlay_hooks_install(void)
     vo = overlay_dlsym(vo_mods, "sceVideoOutRegisterBuffers");
 
     if (vo && detour_install(vo, (void *)vo_reg_hook, (void **)&g_vo_orig) == 0) {
-        ok++;
+        vo_ok = 1;
     }
     if (flip_wl && detour_install(flip_wl, (void *)flip_wl_hook, (void **)&g_flip_wl_orig) == 0) {
-        ok++;
+        flip_ok = 1;
     } else if (flip && detour_install(flip, (void *)flip_hook, (void **)&g_flip_orig) == 0) {
-        ok++;
+        flip_ok = 1;
     }
     if (pad && detour_install(pad, (void *)pad_hook, (void **)&g_pad_orig) == 0) {
-        ok++;
+        pad_ok = 1;
     }
-    return ok >= 2 ? 0 : -1; /* need flip tick + pad; VideoOut optional until buffers exist */
+    snprintf(msg, sizeof msg, "NitePR5 hooks pad=%d flip=%d vo=%d", pad_ok, flip_ok, vo_ok);
+    overlay_notify(msg);
+    return (flip_ok && pad_ok) ? 0 : -1;
 }

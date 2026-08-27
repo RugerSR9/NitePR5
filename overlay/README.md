@@ -35,7 +35,9 @@ Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If y
 4. Toolbox: kill/run **NTPR50001**.
 5. Elfldr **9021**: send **ps5debug-NG** (already required for the web editor).
 6. Start **CUSA13762** (or another CUSA/PPSA title). Wait for the toast **overlay injected**.
-7. **L1+R1+Touchpad** opens the HUD.
+7. **L1+R1+Touchpad click** opens the HUD (click the pad, do not only rest a finger).
+
+After inject you should see extra toasts from the overlay itself: **overlay running**, then **hooks pad=? flip=? vo=?**, then **pad poll ok**. L1+R1+Touchpad click toasts **combo (open)** / **combo (close)**. If you get combo toasts but no panel, the pad path works and VideoOut/flip is the remaining kill.
 
 The plugin waits ~4 s after a game title appears (1 s if a game is already running when NTPR50001 starts), finds `eboot.bin` via `:744`, then `PROC_ELF`. Retry up to 5 times if the eboot is not up yet.
 

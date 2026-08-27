@@ -2,12 +2,22 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #ifndef PROT_READ
 #define PROT_READ  1
 #define PROT_WRITE 2
 #define PROT_EXEC  4
+#endif
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS 0x1000
+#endif
+#ifndef MAP_PRIVATE
+#define MAP_PRIVATE 0x0002
+#endif
+#ifndef MAP_FAILED
+#define MAP_FAILED ((void *)-1)
 #endif
 
 #ifndef PAGE_SIZE
@@ -236,14 +246,20 @@ int detour_install(void *target, void *hook, void **orig_out)
         }
     }
     stub_n = (size_t)stolen + JMP_LEN + 16;
-    stub = (uint8_t *)malloc(stub_n);
-    if (stub == NULL) {
-        return -1;
-    }
-    memset(stub, 0x90, stub_n);
-    if (protect_rwx(stub, stub_n) != 0) {
-        free(stub);
-        return -1;
+    stub = (uint8_t *)mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
+                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (stub == MAP_FAILED || stub == NULL) {
+        stub = (uint8_t *)malloc(stub_n);
+        if (stub == NULL) {
+            return -1;
+        }
+        memset(stub, 0x90, stub_n);
+        if (protect_rwx(stub, stub_n) != 0) {
+            free(stub);
+            return -1;
+        }
+    } else {
+        memset(stub, 0x90, PAGE_SIZE);
     }
     memcpy(stub, src, (size_t)stolen);
     write_abs_jmp(stub + stolen, src + stolen);
