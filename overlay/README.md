@@ -18,13 +18,34 @@ The HUD is a **see-through dark panel** (alpha chrome, game still visible) compo
 
 ## Install / inject
 
-1. Build `overlay.elf` (CI / Linux with Johns SDK — not this Windows PC).
-2. Copy it to **`/data/nitepr5/overlay.elf`** on the console.
-3. Load **NTPR50001** (`nitepr5.plugin`) from the Toolbox so `:1745` is listening.
-4. Load **ps5debug-NG** via elfldr **9021** as usual.
-5. Start a PS4 title. First test: **CUSA13762**.
-6. Inject this ELF into the foreground **`eboot.bin`** with the existing etaHEN-Plugins **Injector / NineS :9033** pattern (process name `eboot.bin`).  
-   Do **not** use HookGame / eboot PLT steal (that fights etaHEN FPS).
+You need **two binaries** (both from the same GitHub Actions run):
+
+| File | What it is | How it loads |
+|---|---|---|
+| `nitepr5.plugin` | Background daemon (freeze + `:1745` + auto-inject) | Toolbox Plugins. **Not** elfldr. |
+| `overlay.elf` | In-game HUD | NTPR50001 maps it into `eboot.bin` at game launch. **Not** Toolbox, **not** elfldr **9021**. |
+
+Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If you send `overlay.elf` there, it will not see the DualSense or the game framebuffer.
+
+### One-time setup
+
+1. CI: download `nitepr5.plugin` (**0.51**) and `overlay.elf`.
+2. Copy the plugin to USB `<usb>/etaHEN/plugins/` or `/data/etaHEN/plugins/`.
+3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback path: `/data/etaHEN/plugins/overlay.elf`.
+4. Toolbox: kill/run **NTPR50001**.
+5. Elfldr **9021**: send **ps5debug-NG** (already required for the web editor).
+6. Start **CUSA13762** (or another CUSA/PPSA title). Wait for the toast **overlay injected**.
+7. **L1+R1+Touchpad** opens the HUD.
+
+The plugin waits ~4 s after a game title appears (1 s if a game is already running when NTPR50001 starts), finds `eboot.bin` via `:744`, then `PROC_ELF`. Retry up to 5 times if the eboot is not up yet.
+
+If the ELF file is missing, the toast is **copy overlay.elf to /data/nitepr5**. If ps5debug-NG is not loaded, **load ps5debug-NG to inject HUD**.
+
+Manual retry (game already running): `POST http://<ps5>:1745/overlay/inject`.
+
+Close the title before Toolbox kill/run of NTPR50001, or a second inject can stack hooks. Do not run a web scan in the same second the game launches (brief `:744` burst).
+
+Do **not** use etaHEN FPS **HookGame** / eboot PLT steal (that fights etaHEN’s FPS loader).
 
 ## Controls (in-process `scePadReadState`)
 

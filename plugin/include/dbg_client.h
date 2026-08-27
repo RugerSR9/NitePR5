@@ -15,6 +15,7 @@
 #define PROC_READ              0xBDAA0002u
 #define PROC_WRITE             0xBDAA0003u
 #define PROC_MAPS              0xBDAA0004u
+#define PROC_ELF               0xBDAA0007u
 #define PROC_INFO              0xBDAA000Au
 #define PROC_NOP               0xBDAACC06u
 #define CONSOLE_FOREGROUND_APP 0xBDDD0006u
@@ -25,7 +26,9 @@
 #define DBG_FOREGROUND_SIZE  140
 #define DBG_WRITE_PACKET_LEN 16
 #define DBG_READ_PACKET_LEN  16
+#define DBG_ELF_PACKET_LEN   8
 #define DBG_READ_MAX         4096u
+#define DBG_ELF_MAX          (8u * 1024u * 1024u)
 
 int dbg_connect(void);
 void dbg_disconnect(void);
@@ -43,6 +46,12 @@ int dbg_proc_write(uint32_t pid, uint64_t addr, const uint8_t *data, uint32_t le
  * No extra phase, no length prefix. Not two-phase like WRITE. Assumes length in 1..DBG_READ_MAX.
  */
 int dbg_proc_read(uint32_t pid, uint64_t addr, uint8_t *out, uint32_t length);
+
+/* Two-phase PROC_ELF (ps5debug-NG PROTOCOL.md): 8-byte <II pid,length> then ACK,
+ * then ELF bytes, then FINAL. Maps into the target as a remote thread — not PT_ATTACH
+ * from this plugin. length 16..DBG_ELF_MAX. Must be a 64-bit ELF.
+ */
+int dbg_proc_elf(uint32_t pid, const uint8_t *elf, uint32_t length);
 
 /* Decode raw PROC_MAPS / PROC_LIST / CONSOLE_FOREGROUND_APP rows (ps5dbg VmMap / ProcInfo). */
 void dbg_decode_map(const uint8_t *row58, char name[33], uint64_t *start, uint64_t *end,

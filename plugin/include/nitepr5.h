@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 #define NITEPR5_TITLE_ID "NTPR50001"
-#define NITEPR5_VERSION  "0.50"
+#define NITEPR5_VERSION  "0.51"
 #define NITEPR5_BASENAME "nitepr5"
 
 #define NITEPR5_HTTP_PORT 1745
@@ -36,9 +36,11 @@
 #define MOD_MAX         64
 #define PATCH_BYTES_MAX 256
 
-#define DATA_DIR   "/data/nitepr5"
-#define CHEATS_DIR "/data/nitepr5/cheats"
-#define STATE_PATH "/data/nitepr5/state.json"
+#define DATA_DIR         "/data/nitepr5"
+#define CHEATS_DIR       "/data/nitepr5/cheats"
+#define STATE_PATH       "/data/nitepr5/state.json"
+#define OVERLAY_ELF_PATH "/data/nitepr5/overlay.elf"
+#define OVERLAY_ELF_ALT  "/data/etaHEN/plugins/overlay.elf"
 
 #define EBOOT_NAME          "eboot.bin"
 #define EXECUTABLE_MAP_NAME "executable"

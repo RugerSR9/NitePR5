@@ -8,7 +8,7 @@ The Phase 3 product is a **PC web editor**. Open `http://127.0.0.1:1744`, connec
 
 ## Status
 
-Phases 0–4 are **done**. Phase 5 overlay is **code-complete** (not hardware-verified): plugin **NTPR50001** 0.50 plus `overlay.elf`. The web UI is the shippable PC editor; the plugin owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
+Phases 0–4 are **done**. Phase 5 overlay is **code-complete** (not hardware-verified): plugin **NTPR50001** 0.51 auto-injects `overlay.elf` at game launch. The web UI is the shippable PC editor; the plugin owns freeze on-console (a web poke is overwritten). After a hung scan or write (`timed out reading 4 bytes`), **Disconnect then Connect** (or restart uvicorn). The rest-mode hint is often a false alarm from a desynced `:744` socket.
 
 ## What you get
 
@@ -106,7 +106,7 @@ If a First Scan reports too many matches, pick a **less common** in-game value a
 
 ## Plugin daemon
 
-The etaHEN plugin (title **NTPR50001**, version **0.40**) owns freeze and cheats when armed so they keep applying with the web UI closed. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
+The etaHEN plugin (title **NTPR50001**, version **0.51**) owns freeze and cheats when armed so they keep applying with the web UI closed. From **0.51** it also injects `overlay.elf` into the launching game via `PROC_ELF`. This Windows PC does **not** compile it. GitHub Actions does (Ubuntu + Johns SDK).
 
 | How | Where to download |
 |---|---|
@@ -115,7 +115,7 @@ The etaHEN plugin (title **NTPR50001**, version **0.40**) owns freeze and cheats
 
 Merges to `main` and pull requests do not compile. The workflow must exist on the branch you run.
 
-Install: copy `nitepr5.plugin` to USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`, then Toolbox **kill** and **run**. Do **not** send it to elfldr **9021**.
+Install: copy `nitepr5.plugin` to USB `<usb>/etaHEN/plugins/` (priority) or `/data/etaHEN/plugins/`, copy `overlay.elf` to `/data/nitepr5/overlay.elf`, then Toolbox **kill** and **run**. Do **not** send either file to elfldr **9021**. Load **ps5debug-NG** on **9021**, launch a CUSA title, wait for the inject toast, then **L1+R1+Touchpad**.
 
 ## Cheat files
 
@@ -147,5 +147,5 @@ Files live in `web/cheats/` on the PC (`web/cheats/**` is gitignored except `.gi
 - Assume an etaHEN plugin can draw the system overlay — it cannot
 - Dump or poll all of game RAM
 - Enable `PT_ATTACH` / pause-the-game from this product
-- Send `overlay.elf` to elfldr **9021** (inject via NineS **:9033** into `eboot.bin`)
+- Send `overlay.elf` to elfldr **9021** (the plugin injects it into `eboot.bin` at game launch)
 - Use this online or on hardware you do not own

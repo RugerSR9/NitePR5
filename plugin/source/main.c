@@ -1,6 +1,6 @@
-/* NitePR5 etaHEN plugin daemon. Freeze/cheats on-console; Wave 1 I/O for a
- * future B3 overlay. Already jailbroken — do not call IPC 9028. Writes only
- * via 127.0.0.1:744. No ShellUI, no pad, no libhijacker.
+/* NitePR5 etaHEN plugin daemon. Freeze/cheats on-console; B3 overlay I/O and
+ * auto-inject of overlay.elf via PROC_ELF. Already jailbroken — do not call
+ * IPC 9028. Writes only via 127.0.0.1:744. No ShellUI, no pad, no libhijacker.
  */
 
 #include "nitepr5.h"

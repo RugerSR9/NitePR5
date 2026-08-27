@@ -417,3 +417,4 @@ Record new decisions here so phases do not silently fork.
 | 2026-08-26 | Phase 4 hardware exit passed: plugin freeze overwrites a manual web poke. Phase 4 `done`. |
 | 2026-08-26 | Phase 5 backend is **B3** (in-game ELF). **B2 is dead** (Toolbox fork). Overlay is a full TV editor (Live/Watch/Freeze/Cheats); scans stay on the PC. Overlay talks to plugin `:1745` only. |
 | 2026-08-26 | Phase 5 Wave 2 source complete: B3 in-game ELF in `overlay/` (VideoOut composite HUD, DualSense, `:1745` client). Hardware exit not run. |
+| 2026-08-26 | Plugin 0.51 auto-injects `overlay.elf` into `eboot.bin` at CUSA/PPSA launch via ps5debug-NG `PROC_ELF` (`0xBDAA0007`). No NineS, no second Toolbox plugin, no `PT_ATTACH` from NTPR50001. |

@@ -1,24 +1,28 @@
-# NitePR5 plugin (Phase 4 + Phase 5 Wave 1)
+# NitePR5 plugin (Phase 4 + Phase 5)
 
-etaHEN background daemon that owns **freeze and cheats** when armed, and **Live / Watch / Freeze / Cheats I/O** for a future B3 overlay. It is not a ShellUI overlay and does not draw on the game. Overlay UI is a later wave (`overlay/` is not this tree).
+etaHEN background daemon that owns **freeze and cheats** when armed, **Live / Watch / Freeze / Cheats I/O** for the B3 overlay, and **auto-inject** of `overlay.elf` into a launching CUSA/PPSA title. It is not a ShellUI overlay and does not draw on the game.
 
-- Title ID **NTPR50001**, version **0.50**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
-- Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from a future overlay)
-- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Idle (not armed, overlay closed) does **not** hold `:744`.
+- Title ID **NTPR50001**, version **0.51**, basename **nitepr5**. etaHEN requires `^[A-Za-z]{4}\d{5}$` — **NPR500001** will not load.
+- Listens **0.0.0.0:1745** HTTP/1.1 JSON (command channel from the PC web UI and from the overlay)
+- Game R/W goes through **one** **127.0.0.1:744** socket (ps5debug-NG). Two-phase `PROC_WRITE`. One-phase `PROC_READ`. Overlay inject is two-phase `PROC_ELF` (`0xBDAA0007`). Idle (not armed, overlay closed) does **not** hold `:744`.
 - Persist `/data/nitepr5/state.json` and GoldHEN JSON under `/data/nitepr5/cheats/` (never `/data/etaHEN/cheats/`). Watches and `overlay_open` are RAM-only.
-- Classic TV toast on start, armed, and when `:744` is missing
+- Classic TV toast on start, armed, `:744` missing, overlay injected / missing ELF / inject fail
+- Auto-inject via `PROC_ELF` on the existing `:744` client (no `PT_ATTACH` from this plugin)
 
 ## Install
 
 Do **not** send this file to elfldr **9021** (that port is for one-shot ELFs like ps5debug-NG).
 
-1. Get `nitepr5.plugin` from GitHub Actions (see [Build](#build)).
-2. Copy it to:
+1. Get `nitepr5.plugin` **and** `overlay.elf` from GitHub Actions (see [Build](#build)).
+2. Copy `nitepr5.plugin` to:
    - USB: `<usb>/etaHEN/plugins/` (priority), or
    - Internal: `/data/etaHEN/plugins/`
-3. Enable or **kill then run** from the etaHEN Toolbox (title **NTPR50001**).
+3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback: `/data/etaHEN/plugins/overlay.elf`.
+4. Enable or **kill then run** from the etaHEN Toolbox (title **NTPR50001**).
+5. Load **ps5debug-NG** on elfldr **9021** (already required for the editor).
+6. Launch a CUSA/PPSA title. After a few seconds the TV should toast **overlay injected**. **L1+R1+Touchpad** opens the HUD.
 
-Plugins are already jailbroken; do not call IPC 9028.
+Plugins are already jailbroken; do not call IPC 9028. Do not send `overlay.elf` to **9021** (that starts a new process with no game pad or framebuffer).
 
 ## Build
 
@@ -47,13 +51,14 @@ Addresses are JSON integers (64-bit VAs as raw decimal). Bytes are hex strings. 
 
 | Method | Path | Result |
 |---|---|---|
-| GET | `/status` | `{ok, armed, pid, freeze_count, cheat_id, enabled, dbg, overlay_open, watch_count}` |
+| GET | `/status` | `{ok, armed, pid, freeze_count, cheat_id, enabled, dbg, overlay_open, watch_count, overlay_injected, overlay_pid}` |
 | POST | `/arm` | persist freeze/cheat; plugin owns the 15 Hz tick |
 | POST | `/disarm` | stop freeze tick; keep files; disconnect `:744` unless `overlay_open` |
 | POST | `/cheat/toggle` | `{name, enabled}` |
 | POST | `/cheat/load` | GoldHEN JSON body or `{filename}` under `/data/nitepr5/cheats/` |
 | POST | `/overlay/open` | `{pid?}` else stored pid; connect `:744`; does not require armed |
 | POST | `/overlay/close` | `overlay_open=false`; clear watches; disconnect if not armed |
+| POST | `/overlay/inject` | map `/data/nitepr5/overlay.elf` into `eboot.bin` now (same path as auto-inject) |
 | GET | `/read` | query `addr`, `n?=512`, `pid?` → `{addr, n, data}` hex; `n` 1..4096 |
 | POST | `/write` | `{addr, data, pid?}` two-phase PROC_WRITE; data 1..4096 B |
 | GET | `/maps` | `{maps:[{name,start,end,offset,prot}]}` metadata only |

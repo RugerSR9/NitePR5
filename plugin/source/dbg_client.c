@@ -368,6 +368,58 @@ int dbg_proc_read(uint32_t pid, uint64_t addr, uint8_t *out, uint32_t length)
     return 0;
 }
 
+static int dbg_set_timeout(int sec)
+{
+    struct timeval tv;
+
+    if (g_fd < 0) {
+        return -1;
+    }
+    memset(&tv, 0, sizeof tv);
+    tv.tv_sec = sec;
+    if (setsockopt(g_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) != 0) {
+        return -1;
+    }
+    return setsockopt(g_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+}
+
+int dbg_proc_elf(uint32_t pid, const uint8_t *elf, uint32_t length)
+{
+    uint8_t packet[DBG_ELF_PACKET_LEN];
+
+    if (elf == NULL || length < 16 || length > DBG_ELF_MAX) {
+        return -1;
+    }
+    if (elf[0] != 0x7f || elf[1] != 'E' || elf[2] != 'L' || elf[3] != 'F') {
+        return -1;
+    }
+
+    /* Phase 1: request body is exactly 8 bytes so datalen 8. Never pack ELF here. */
+    memset(packet, 0, sizeof packet);
+    put_u32le(packet + 0, pid);
+    put_u32le(packet + 4, length);
+
+    (void)dbg_set_timeout(20);
+    if (send_request(PROC_ELF, packet, DBG_ELF_PACKET_LEN) != 0) {
+        (void)dbg_set_timeout(2);
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+
+    /* Phase 2: ELF is a separate send, not concatenated into datalen. */
+    if (send_all(g_fd, elf, length) != 0) {
+        dbg_disconnect();
+        return -1;
+    }
+    if (read_status() != 0) {
+        return -1;
+    }
+    (void)dbg_set_timeout(2);
+    return 0;
+}
+
 static int recv_count_then(uint32_t *count, void *entries, uint32_t cap, uint32_t elem)
 {
     uint8_t nbuf[4];

@@ -50,3 +50,23 @@ void notify_dbg_recovered(void)
 {
     g_dbg_missing_told = 0;
 }
+
+void notify_overlay_injected(void)
+{
+    notify_toast("NitePR5 overlay injected (L1+R1+Touchpad)");
+}
+
+void notify_overlay_missing_elf(void)
+{
+    notify_toast("NitePR5: copy overlay.elf to /data/nitepr5");
+}
+
+void notify_overlay_no_dbg(void)
+{
+    notify_toast("NitePR5: load ps5debug-NG to inject HUD");
+}
+
+void notify_overlay_fail(void)
+{
+    notify_toast("NitePR5 overlay inject failed");
+}

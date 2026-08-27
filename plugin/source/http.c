@@ -3,6 +3,7 @@
 #include "dbg_client.h"
 #include "freeze.h"
 #include "fs_state.h"
+#include "inject.h"
 #include "nitepr5.h"
 #include "notify.h"
 #include "cJSON.h"
@@ -447,6 +448,8 @@ static void handle_status(int fd)
     cJSON_AddBoolToObject(o, "dbg", st->dbg ? 1 : 0);
     cJSON_AddBoolToObject(o, "overlay_open", st->overlay_open ? 1 : 0);
     cJSON_AddNumberToObject(o, "watch_count", st->watch_count);
+    cJSON_AddBoolToObject(o, "overlay_injected", inject_pid() != 0);
+    cJSON_AddNumberToObject(o, "overlay_pid", (double)inject_pid());
     js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     http_send(fd, 200, js ? js : "{\"ok\":false,\"error\":\"BadRequest\"}");
@@ -798,6 +801,39 @@ static void handle_overlay_close(int fd)
         st->dbg = dbg_connected() ? 1 : 0;
     }
     http_send(fd, 200, "{\"ok\":true,\"overlay_open\":false}");
+}
+
+static void handle_overlay_inject(int fd)
+{
+    cJSON *o;
+    int rc;
+
+    rc = inject_now();
+    o = cJSON_CreateObject();
+    if (rc == INJECT_OK) {
+        notify_overlay_injected();
+        cJSON_AddBoolToObject(o, "ok", 1);
+        cJSON_AddNumberToObject(o, "pid", (double)inject_pid());
+        http_send_obj(fd, 200, o);
+        return;
+    }
+    if (rc == INJECT_ALREADY) {
+        cJSON_AddBoolToObject(o, "ok", 1);
+        cJSON_AddBoolToObject(o, "already", 1);
+        cJSON_AddNumberToObject(o, "pid", (double)inject_pid());
+        http_send_obj(fd, 200, o);
+        return;
+    }
+    cJSON_Delete(o);
+    if (rc == INJECT_MISSING_ELF) {
+        http_err(fd, "NoOverlayElf");
+    } else if (rc == INJECT_NO_DBG) {
+        http_err(fd, "NotConnected");
+    } else if (rc == INJECT_NO_EBOOT) {
+        http_err(fd, "NoTarget");
+    } else {
+        http_err(fd, "InjectFailed");
+    }
 }
 
 static void handle_read(int fd, const char *query)
@@ -1373,6 +1409,8 @@ static void http_handle_client(int fd)
         handle_overlay_open(fd, body);
     } else if (strcmp(method, "POST") == 0 && path_is(path, "/overlay/close")) {
         handle_overlay_close(fd);
+    } else if (strcmp(method, "POST") == 0 && path_is(path, "/overlay/inject")) {
+        handle_overlay_inject(fd);
     } else if (strcmp(method, "GET") == 0 && path_is(path, "/read")) {
         handle_read(fd, query);
     } else if (strcmp(method, "POST") == 0 && path_is(path, "/write")) {
@@ -1425,6 +1463,7 @@ void http_run(void)
     if (listen_fd < 0) {
         for (;;) {
             freeze_tick();
+            inject_poll();
             usleep((useconds_t)POLL_TIMEOUT_MS * 1000);
         }
     }
@@ -1441,6 +1480,7 @@ void http_run(void)
         close(listen_fd);
         for (;;) {
             freeze_tick();
+            inject_poll();
             usleep((useconds_t)POLL_TIMEOUT_MS * 1000);
         }
     }
@@ -1469,5 +1509,6 @@ void http_run(void)
         if (st->armed) {
             freeze_tick();
         }
+        inject_poll();
     }
 }
