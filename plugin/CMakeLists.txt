@@ -45,7 +45,7 @@ endif()
 set(PLUGIN_TITLE_ID "NTPR50001")
 
 # PLUGIN_VERSION should always be in #.## format, ex. 0.501 should be set as 0.50
-set(PLUGIN_VERSION "0.57")
+set(PLUGIN_VERSION "0.58")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ add_executable(nitepr5
   source/notify.c
   source/fs_state.c
   source/inject.c
+  source/got_patch.c
   third_party/cjson/cJSON.c
   third_party/elfldr/pt.c
   third_party/elfldr/elfldr.c
@@ -105,7 +106,7 @@ set_target_properties(nitepr5 PROPERTIES
 add_custom_command(TARGET nitepr5 POST_BUILD
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_plugin.py"
           "$<TARGET_FILE:nitepr5>" "${PLUGIN_TITLE_ID}" "${PLUGIN_VERSION}"
-  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.571)"
+  COMMENT "Wrapping ELF as etaHEN .plugin (NTPR50001 0.58)"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   VERBATIM
 )

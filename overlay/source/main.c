@@ -68,8 +68,11 @@ int main(void)
     overlay_notify("NitePR5 overlay running");
     net_init();
     (void)overlay_worker_start();
-    /* 0.573: do not hook GNM/VO here. 0.572 SPRX body detours during
-     * inject → CE-108255-1. Worker installs eboot GOT hooks after pad poll. */
+
+    /* 0.574: same as 0.571. Overlay never installs GNM/VO hooks (0.572 SPRX
+     * jmp and 0.573 in-game kernel GOT both CE-108255-1 at launch). Pad poll
+     * only. Plugin patches eboot GOT on combo /overlay/open. */
+    overlay_notify("NitePR5 pad poll only (hooks off)");
 
     for (;;) {
         sleep(0x4000);

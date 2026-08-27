@@ -175,8 +175,6 @@ void overlay_pad_poll(void)
     if (!ok_told) {
         ok_told = 1;
         overlay_notify("NitePR5 pad poll ok (click touchpad)");
-        /* Game is up; inject window is over. GOT swap, not SPRX mprotect. */
-        (void)overlay_hooks_install();
     }
     {
         uint32_t buttons = *(uint32_t *)data;
@@ -206,43 +204,54 @@ void overlay_pad_poll(void)
     }
 }
 
-int overlay_hooks_install(void)
+int overlay_hooks_resolve(void)
 {
-    static int once;
     static const char *gnm_mods[] = {"libSceGnmDriverForNeoMode.sprx", "libSceGnmDriver.sprx", NULL};
     static const char *vo_mods[] = {"libSceVideoOut.sprx", "libSceVideoOutForNeoMode.sprx", NULL};
     void *flip_wl;
     void *flip;
     void *vo;
-    int pad_ok = 0; /* pad detour off; DualSense is pad poll */
-    int flip_ok = 0;
-    int vo_ok = 0;
-    char msg[80];
 
     /* Keep pad_hook compiled; do not steal scePadReadState PLT. */
     (void)pad_hook;
     (void)detour_install;
+    (void)got_hook_install;
 
-    if (once) {
-        return 0;
-    }
-    once = 1;
-
-    /* Resolve the SPRX export, then swap eboot GOT slots that point at it.
-     * Do not mprotect GNM/VO text (0.572 CE-108255-1). */
+    /* dlsym only. Overlay never patches GOT/SPRX. */
     flip_wl = overlay_dlsym(gnm_mods, "sceGnmSubmitAndFlipCommandBuffersForWorkload");
     flip = overlay_dlsym(gnm_mods, "sceGnmSubmitAndFlipCommandBuffers");
     vo = overlay_dlsym(vo_mods, "sceVideoOutRegisterBuffers");
+    if (flip_wl) {
+        g_flip_wl_orig = (gnm_flip_wl_fn)flip_wl;
+    }
+    if (flip) {
+        g_flip_orig = (gnm_flip_fn)flip;
+    }
+    if (vo) {
+        g_vo_orig = (vo_reg_fn)vo;
+    }
+    return (g_flip_wl_orig || g_flip_orig) ? 0 : -1;
+}
 
-    if (vo && got_hook_install(vo, (void *)vo_reg_hook, (void **)&g_vo_orig) == 0) {
-        vo_ok = 1;
+void overlay_hooks_export(uint64_t *flip_wl_real, uint64_t *flip_wl_hk, uint64_t *flip_real,
+                          uint64_t *flip_hk, uint64_t *vo_real, uint64_t *vo_hk)
+{
+    if (flip_wl_real) {
+        *flip_wl_real = (uint64_t)(uintptr_t)g_flip_wl_orig;
     }
-    if (flip_wl && got_hook_install(flip_wl, (void *)flip_wl_hook, (void **)&g_flip_wl_orig) == 0) {
-        flip_ok = 1;
-    } else if (flip && got_hook_install(flip, (void *)flip_hook, (void **)&g_flip_orig) == 0) {
-        flip_ok = 1;
+    if (flip_wl_hk) {
+        *flip_wl_hk = (uint64_t)(uintptr_t)(void *)flip_wl_hook;
     }
-    snprintf(msg, sizeof msg, "NitePR5 hooks pad=%d flip=%d vo=%d", pad_ok, flip_ok, vo_ok);
-    overlay_notify(msg);
-    return flip_ok ? 0 : -1;
+    if (flip_real) {
+        *flip_real = (uint64_t)(uintptr_t)g_flip_orig;
+    }
+    if (flip_hk) {
+        *flip_hk = (uint64_t)(uintptr_t)(void *)flip_hook;
+    }
+    if (vo_real) {
+        *vo_real = (uint64_t)(uintptr_t)g_vo_orig;
+    }
+    if (vo_hk) {
+        *vo_hk = (uint64_t)(uintptr_t)(void *)vo_reg_hook;
+    }
 }

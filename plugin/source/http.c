@@ -4,6 +4,7 @@
 #include "freeze.h"
 #include "fs_state.h"
 #include "inject.h"
+#include "got_patch.h"
 #include "nitepr5.h"
 #include "notify.h"
 #include "cJSON.h"
@@ -744,6 +745,10 @@ static void handle_overlay_open(int fd, const char *body)
     cJSON *pid_j;
     uint32_t pid;
     cJSON *o;
+    uint64_t flip_wl_real = 0, flip_wl_hook = 0, flip_real = 0, flip_hook = 0, vo_real = 0,
+             vo_hook = 0;
+    int flip_n = 0, vo_n = 0;
+    char msg[80];
 
     root = cJSON_Parse((body && body[0]) ? body : "{}");
     if (root == NULL || !cJSON_IsObject(root)) {
@@ -765,6 +770,12 @@ static void handle_overlay_open(int fd, const char *body)
     } else {
         pid = st->pid;
     }
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "flip_wl_real"), &flip_wl_real);
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "flip_wl_hook"), &flip_wl_hook);
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "flip_real"), &flip_real);
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "flip_hook"), &flip_hook);
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "vo_real"), &vo_real);
+    (void)json_u64(cJSON_GetObjectItemCaseSensitive(root, "vo_hook"), &vo_hook);
     cJSON_Delete(root);
     if (pid == 0) {
         http_err(fd, "NoTarget");
@@ -778,11 +789,67 @@ static void handle_overlay_open(int fd, const char *body)
         st->dbg = 0;
         notify_dbg_missing();
     }
+    /* Plugin resolves SPRX exports (jailbroken). Overlay only sends hook
+     * addresses. Do not trust overlay_dlsym as the GOT search key. */
+    if (flip_wl_hook) {
+        uint64_t real = got_resolve_sym(pid, "libSceGnmDriverForNeoMode.sprx",
+                                        "sceGnmSubmitAndFlipCommandBuffersForWorkload");
+        if (real == 0) {
+            real = got_resolve_sym(pid, "libSceGnmDriver.sprx",
+                                   "sceGnmSubmitAndFlipCommandBuffersForWorkload");
+        }
+        if (real == 0) {
+            real = flip_wl_real;
+        }
+        if (real) {
+            int n = got_patch_eboot(pid, real, flip_wl_hook);
+            if (n > 0) {
+                flip_n = n;
+            }
+        }
+    }
+    if (flip_n == 0 && flip_hook) {
+        uint64_t real = got_resolve_sym(pid, "libSceGnmDriverForNeoMode.sprx",
+                                        "sceGnmSubmitAndFlipCommandBuffers");
+        if (real == 0) {
+            real = got_resolve_sym(pid, "libSceGnmDriver.sprx",
+                                   "sceGnmSubmitAndFlipCommandBuffers");
+        }
+        if (real == 0) {
+            real = flip_real;
+        }
+        if (real) {
+            int n = got_patch_eboot(pid, real, flip_hook);
+            if (n > 0) {
+                flip_n = n;
+            }
+        }
+    }
+    if (vo_hook) {
+        uint64_t real = got_resolve_sym(pid, "libSceVideoOut.sprx", "sceVideoOutRegisterBuffers");
+        if (real == 0) {
+            real = got_resolve_sym(pid, "libSceVideoOutForNeoMode.sprx",
+                                   "sceVideoOutRegisterBuffers");
+        }
+        if (real == 0) {
+            real = vo_real;
+        }
+        if (real) {
+            int n = got_patch_eboot(pid, real, vo_hook);
+            if (n > 0) {
+                vo_n = n;
+            }
+        }
+    }
+    snprintf(msg, sizeof msg, "NitePR5 got flip=%d vo=%d", flip_n, vo_n);
+    notify_toast(msg);
     o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "ok", 1);
     cJSON_AddBoolToObject(o, "overlay_open", 1);
     cJSON_AddNumberToObject(o, "pid", (double)st->pid);
     cJSON_AddBoolToObject(o, "dbg", st->dbg ? 1 : 0);
+    cJSON_AddNumberToObject(o, "got_flip", (double)flip_n);
+    cJSON_AddNumberToObject(o, "got_vo", (double)vo_n);
     http_send_obj(fd, 200, o);
 }
 

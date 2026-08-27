@@ -18,26 +18,25 @@ The HUD is a **see-through dark panel** (alpha chrome, game still visible) compo
 
 ## Install / inject
 
-You need **two binaries**. Plugin wrap stays **0.57**; overlay **0.573** can replace `overlay.elf` alone:
+You need **two binaries from the same CI run**. Overlay **0.574** + plugin wrap **0.58**. Overlay-only (old 0.57 plugin) still boots like 0.571 but cannot patch GOT.
 
 | File | What it is | How it loads |
 |---|---|---|
-| `nitepr5.plugin` | Background daemon (freeze + `:1745` + auto-inject) | Toolbox Plugins. **Not** elfldr. |
+| `nitepr5.plugin` | Background daemon (freeze + `:1745` + auto-inject + GOT on combo) | Toolbox Plugins. **Not** elfldr. |
 | `overlay.elf` | In-game HUD | NTPR50001 maps it into `eboot.bin` at game launch. **Not** Toolbox, **not** elfldr **9021**. |
 
 Elfldr **9021** starts a **new** process (that is how `ps5debug-NG` loads). If you send `overlay.elf` there, it will not see the DualSense or the game framebuffer.
 
 ### One-time setup
 
-1. CI: download `overlay.elf` (**0.573**). Plugin wrap stays **0.57** — keep the existing `nitepr5.plugin` and only replace `overlay.elf` unless you also rebuilt the plugin.
-2. Copy the plugin to USB `<usb>/etaHEN/plugins/` or `/data/etaHEN/plugins/` (skip if NTPR50001 0.57 is already installed).
+1. CI: download **`nitepr5.plugin` (0.58)** and **`overlay.elf` (0.574)**.
+2. Copy the plugin to USB `<usb>/etaHEN/plugins/` or `/data/etaHEN/plugins/`. Toolbox kill/run **NTPR50001**.
 3. Copy `overlay.elf` to **`/data/nitepr5/overlay.elf`** (FTP). Fallback path: `/data/etaHEN/plugins/overlay.elf`.
-4. Toolbox: kill/run **NTPR50001**.
-5. Elfldr **9021**: send **ps5debug-NG** (already required for the web editor).
-6. Start **CUSA13762** (or another CUSA/PPSA title). Wait ~12 s for the toast **overlay injected**, then **overlay running** from the ELF and **overlay entry is up** (plugin heartbeat). If you get **overlay silent (never started)**, CRT/`main()` never reached overlay_boot — copy the matching CI `overlay.elf`. The game must keep booting (0.52 parked the stolen thread; 0.54 CE-108255-1). **0.572** inline-patched GNM SPRX during inject → **CE-108255-1**; **0.573** does not.
-7. **L1+R1+Touchpad click** opens the HUD (click the pad, do not only rest a finger).
+4. Elfldr **9021**: send **ps5debug-NG** (already required for the web editor).
+5. Start **CUSA13762**. Wait ~12 s for **overlay injected**, then **overlay running** and **pad poll only (hooks off)**, then **pad poll ok**. The game must **stay up**. **0.572** SPRX jmp and **0.573** in-game kernel GOT both **CE-108255-1 at launch** — overlay must not install hooks.
+6. **L1+R1+Touchpad click** after you are in-game. Combo toasts **open/close**. Plugin toasts **got flip=? vo=?** (privileged eboot GOT swap). Panel if flip≥1.
 
-After inject you should see: **overlay running**, then **pad poll ok**, then **hooks pad=0 flip=? vo=?** (GOT swap after the game is up). L1+R1+Touchpad click toasts **combo (open)** / **combo (close)**. **0.573** does **not** `mprotect` GNM/VideoOut code. It swaps eboot GOT slots that already point at those exports. The panel should appear when open if flip=1 and buffers were captured (`vo=1`, or a later re-register). If you get combo toasts but a blank panel, inject likely missed `sceVideoOutRegisterBuffers` — re-register (resolution/HDR toggle) or fresh-launch the title. If you only see the plugin **overlay injected** toast, an old PROC_ELF ELF is still on the console (it never reached `main()`).
+If you get **overlay silent (never started)**, CRT/`main()` never ran — copy the matching CI `overlay.elf`. If combo toasts but a blank panel, missed `RegisterBuffers` — resolution/HDR toggle or note it. If you only see the plugin **overlay injected** toast, an old PROC_ELF ELF is still on the console.
 
 The plugin waits ~12 s after a game title appears, then Johns `elfldr_inject` (int3 stager, not `pt_call`). Overlay CRT starts ~2 s later (`overlay_gate`).
 
@@ -47,7 +46,7 @@ Manual retry (game already running): `POST http://<ps5>:1745/overlay/inject`.
 
 Close the title before Toolbox kill/run of NTPR50001, or a second inject can stack hooks. Do not run a web scan in the same second the game launches (brief `:744` burst).
 
-Do **not** use etaHEN FPS **HookGame** / eboot **pad** PLT steal (that fights etaHEN’s FPS loader). **0.573** only swaps eboot GOT slots for GNM flip + VideoOut `RegisterBuffers`. Pad stays poll-only.
+Do **not** use etaHEN FPS **HookGame** / eboot **pad** PLT steal. **0.574** overlay never patches GNM. Plugin **0.58** swaps eboot GOT for GNM flip + VideoOut `RegisterBuffers` on combo only. Pad stays poll-only.
 
 ## Controls (DualSense via pad poll)
 

@@ -8,7 +8,7 @@ Current board: [STATUS.md](STATUS.md). Spawn rules: [ORCHESTRATION.md](ORCHESTRA
 
 ## Next orchestrator — start here (2026-08-27)
 
-Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inject + L1+R1+Touchpad open/close toasts **passed** (0.571). **0.572 HUD SPRX detours caused CE-108255-1 during inject.** **0.573** restores the 0.571 inject path (`main()` does not hook) and swaps **eboot GOT** slots after pad poll. **Do not kill the overlay spike.** Do not re-implement Phases 0–4. **No PS5 ELF cross-compile** on this Windows PC. GitHub Actions builds `nitepr5.plugin` and `overlay.elf`.
+Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inject + combo toasts **passed** on **0.571**. **0.572 SPRX jmp and 0.573 in-game kernel GOT both CE-108255-1 at launch.** Pad poll succeeds during boot, so any overlay-side GNM install is still in the inject window. **0.574 overlay never installs hooks** (0.571 path). **Plugin 0.58** patches eboot GOT on combo (`POST /overlay/open`). **Do not kill the overlay spike.** **No PS5 ELF cross-compile** on this Windows PC.
 
 | Fact | Value |
 |---|---|
@@ -18,18 +18,18 @@ Phases **0–4 are `done` on hardware.** Phase 5 is **B3**, `code_complete`. Inj
 | Phases 0–3 | `done` (hunt, poke, freeze, GoldHEN save/reload/toggle) |
 | Phase 4 | `done` — NTPR50001; plugin freeze overwrites web pokes (user 2026-08-26) |
 | Mock tests | `python -m pytest web/tests web/nitepr5_core/tests -q` → **121 passed** (2026-08-25) |
-| Phase 5 | **B3**. Inject + combo passed. **0.572 CE**. **0.573** GOT hooks. Hardware panel not run. |
-| Version | Overlay **0.573**. Plugin **`.plugin` wrap is `0.57`**. User: do not call it 0.62. |
+| Phase 5 | **B3**. 0.571 inject+combo passed. 0.572/0.573 CE at launch. **0.574** + plugin **0.58**. |
+| Version | Overlay **0.574**. Plugin wrap **0.58**. Do not call it 0.62. |
 
 ### Next job (only this)
 
-**Hardware for 0.573.** CI `workflow_dispatch` → copy **`overlay.elf` only** (plugin wrap **0.57**). Cold-start **CUSA13762**. Game must **stay up** (no CE-108255-1). Then: `overlay running` → `pad poll ok` → `hooks pad=0 flip=? vo=?`. Combo open/close. See-through panel if flip=1.
+**Hardware:** CI both **`nitepr5.plugin` 0.58** and **`overlay.elf` 0.574**. Cold-start CUSA13762. Game must **stay up** with toasts `overlay running` → `pad poll only (hooks off)` → `pad poll ok`. Then combo **in-game**: `combo (open)` + plugin `got flip=? vo=?`.
 
-Do **not** revive SPRX body `detour_install` (mprotect GNM text). Do **not** raise game authid/caps. Do **not** return from `main()`. Do **not** `pt_call(scePthreadCreate)`. Do **not** steal `scePadReadState` PLT.
+Do **not** install GNM/VO hooks from overlay.elf. Do **not** call Johns `kernel_*` from overlay. Do **not** raise authid. Do **not** return from `main()`. Do **not** `pt_call(scePthreadCreate)`. Do **not** steal pad PLT.
 
-**Exit:** game stays up; combo opens a **see-through panel**; poke one value via overlay → plugin `:1745` → `:744`.
+**Exit:** game stays up; combo opens a **see-through panel**; poke one value overlay → `:1745` → `:744`.
 
-Known kill: inject **after** `RegisterBuffers` → blank panel until re-register or fresh launch (`vo=0` is OK if a later register is captured). `flip=0` means GOT slot not found — do not fall back to SPRX jmp.
+If launch still CEs with 0.574 overlay, the ELF itself (not hooks) is the suspect — compare to 0.571. If launch is clean but combo CEs, plugin GOT is the suspect; overlay-only 0.574 + old 0.57 plugin should still play.
 
 ### Working inject path (do not regress)
 
@@ -49,6 +49,7 @@ Vendored: `plugin/third_party/elfldr/` (websrv `pt.c`/`elfldr.c`, GPL-3, John T�
 | `pt_call(scePthreadCreate)` | Single-steps the **new** thread; restores game regs onto it. Toast order **running → pad poll ok → injected → CE**. |
 | Widen game `ucred` / authid `0x4800000000000007` | Clean return to **XMB**, no CE. |
 | Inline SPRX `detour_install` (mprotect RWX + 14-byte jmp on GNM/VO) | **CE-108255-1** during inject (0.572). Game caps already restored. |
+| In-game Johns `kernel_*` GOT patch after pad poll | **CE-108255-1 at launch** (0.573). Pad poll succeeds during boot. |
 | `pthread_create` / `thr_new` / `__crt_syscall` on the **hijacked boot thread** | Silent or **CE-108255-1** (0.53–0.54). |
 | Overlay on elfldr **9021** | New process, no pad/framebuffer. |
 | NineS `:9033` | Forbidden. |
@@ -57,15 +58,15 @@ Vendored: `plugin/third_party/elfldr/` (websrv `pt.c`/`elfldr.c`, GPL-3, John T�
 
 ### Version wrap
 
-- etaHEN `.plugin` header: historically `^\d\.\d{2}$`. `plugin/CMakeLists.txt` **`PLUGIN_VERSION 0.57`**. Comment: `0.501` → wrap as `0.50`.
+- etaHEN `.plugin` header: historically `^\d\.\d{2}$`. `plugin/CMakeLists.txt` **`PLUGIN_VERSION 0.58`**. Comment: `0.501` → wrap as `0.50`.
 - `make_plugin.py` also allows `x.xxx`. Prefer **`x.xx` on the plugin wrap** so Toolbox loads.
-- `overlay/include/overlay.h` **`OVERLAY_VERSION 0.573`**. `plugin/include/nitepr5.h` still says `0.571` (string only; wrap uses CMake **0.57**).
+- `overlay/include/overlay.h` **`OVERLAY_VERSION 0.574`**. `plugin/include/nitepr5.h` **`0.574`** (string); wrap uses CMake **0.58**.
 
 ### Files that matter
 
 - Plugin inject: `plugin/source/inject.c`, `plugin/third_party/elfldr/{elfldr.c,pt.c}` (`elfldr_inject`)
-- Overlay entry: `overlay/source/start.c` (`overlay_gate`), `overlay/source/main.c` (no hooks; never returns)
-- HUD: `overlay/source/{hooks,draw,hud,detour,worker}.c` — **0.573** eboot GOT swap after pad poll; `detour_install` hard-fails
+- Overlay entry: `overlay/source/start.c` (`overlay_gate`), `overlay/source/main.c` (hooks **off**, never returns)
+- HUD: `overlay/source/{hooks,draw,hud,worker}.c` — pad poll only; plugin `got_patch.c` on `/overlay/open`
 - Combo: `PAD_COMBO` = L1+R1+Touchpad click in `overlay/include/overlay.h`
 - Plugin I/O: `plugin/source/http.c` `:1745`; freeze tick stays in the plugin
 - CI: `.github/workflows/main.yml` (plugin + overlay jobs). `workflow_dispatch`. Not on `main` merge.
@@ -115,11 +116,11 @@ Addresses are JSON integers (not hex strings). Bytes are hex strings. Empty free
 
 ### What the next agent should do
 
-See **Next orchestrator — start here** at the top. Phase 4 is **`done`**. Next is **hardware** for overlay **0.573** (no CE, then panel + poke). Do not send overlay to elfldr **9021**. Do not NineS `:9033`.
+See **Next orchestrator — start here** at the top. Phase 4 is **`done`**. Next is **hardware** for overlay **0.574** + plugin **0.58**. Do not send overlay to elfldr **9021**. Do not NineS `:9033`.
 
 ### Phase 4 plugin tree
 
-`plugin/` exists. Title NTPR50001. **Wrap version `0.57`**. HTTP :1745. Inject: int3 stager after elfldr_load. Heartbeat `/data/nitepr5/overlay.alive`. ELF is built in GitHub Actions, not on this Windows PC.
+`plugin/` exists. Title NTPR50001. **Wrap version `0.58`**. HTTP :1745. Inject: int3 stager after elfldr_load. Heartbeat `/data/nitepr5/overlay.alive`. ELF is built in GitHub Actions, not on this Windows PC.
 
 `make_plugin.py` TID `^[A-Za-z]{4}\d{5}$`. **NTPR50001** matches. **NPR500001** did not (3+6) and etaHEN refused to load it. Plugin wrap prefer `x.xx`.
 
@@ -132,7 +133,7 @@ User: full on-TV editor (Live / Watch / Freeze / Cheats / related views). No tur
 | Backend | Verdict |
 |---|---|
 | **B2** ShellUI PUI | **NO-GO.** Overlay Labels + DualSense shortcuts are Toolbox-in-`SceShellUI` only. No plugin PUI API. Fork required. |
-| **B3** in-game ELF | **GO.** Inject + combo toasts **passed** (0.571). **0.572** SPRX detour → CE. **0.573** eboot GOT after pad poll. Hardware panel not run. |
+| **B3** in-game ELF | **GO.** 0.571 inject+combo **passed**. 0.572/0.573 **CE at launch**. **0.574** overlay hooks off; plugin **0.58** GOT on combo. |
 | Plugin I/O | **GO.** `PROC_READ=0xBDAA0002` one-phase (`<IQI` pid,addr,len → SUCCESS → `length` bytes). Not two-phase. Cap `n` 1..4096. |
 
 **B3 shape:** `overlay/` = Johns SDK ELF, `/data/nitepr5/overlay.elf`. Plugin auto-injects via int3 stager. **Do not** steal `scePadReadState` PLT if etaHEN FPS already did. Memory: HTTP `127.0.0.1:1745` → NTPR50001 → `:744`. In-process game `memcpy` **forbidden**. Combo: L1+R1+Touchpad. Leave ShellUI shortcuts alone.
@@ -199,7 +200,7 @@ Gitignored: `.ps5debug-host` (`192.168.4.42`), `web/cheats/**` except `.gitkeep`
 2. `docs/STATUS.md`
 3. `docs/ARCHITECTURE.md` §3, §5.1, §5.3, Phase 3–4 exit
 4. **This file** — paste Phase 0 + 1 + 2 + **3** into every worker prompt
-5. `docs/ORCHESTRATION.md` Phase 5 — next is **hardware** for 0.573 (no CE, then panel + poke); inject + combo already passed
+5. `docs/ORCHESTRATION.md` Phase 5 — next is **hardware** for 0.574 overlay + 0.58 plugin; do not hook GNM from overlay.elf
 
 Forbidden: B2+B3 together, pointer/AOB/disasm, unbounded polling, `PT_ATTACH` for editor R/W (plugin B3 elfldr inject window is the exception), second `:744` from overlay, ELF cross-compile on this Windows PC (CI is allowed).
 
@@ -618,4 +619,4 @@ Also touched: `session.py`, `transport.py` (`write` + `write_calls`), `constants
 
 | Phase | Job |
 |---|---|
-| 5 | **B3** inject + combo **passed**. **0.572** SPRX detour **CE**. **0.573** GOT hooks. Next: hardware (game stays up, then panel + poke). Overlay spike is not optional. |
+| 5 | **B3** 0.571 inject+combo **passed**. 0.572/0.573 **CE at launch**. **0.574** no in-game hook; plugin **0.58** GOT on combo. Overlay spike is not optional. |
