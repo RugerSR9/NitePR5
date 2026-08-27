@@ -43,7 +43,9 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "[Cc]lang")
 endif()
 
 set(PLUGIN_TITLE_ID "NTPR50001")
-set(PLUGIN_VERSION "0.571")
+
+# PLUGIN_VERSION should always be in #.## format, ex. 0.501 should be set as 0.50
+set(PLUGIN_VERSION "0.57")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
